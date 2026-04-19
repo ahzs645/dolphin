@@ -25,6 +25,11 @@ static std::array<u8, EFB_WIDTH * EFB_HEIGHT * 6> efb;
 
 static std::array<u32, PQ_NUM_MEMBERS> perf_values;
 
+#ifdef __EMSCRIPTEN__
+static std::vector<u8> s_web_efb_snapshot;
+static u32 s_web_efb_version = 0;
+#endif
+
 static inline u32 GetColorOffset(u16 x, u16 y)
 {
   return (x + y * EFB_WIDTH) * 3;
@@ -476,6 +481,57 @@ static u32 GetColor(u16 x, u16 y)
   u32 offset = GetColorOffset(x, y);
   return GetPixelColor(offset);
 }
+
+#ifdef __EMSCRIPTEN__
+extern "C"
+{
+int dolphin_web_efb_width()
+{
+  return EFB_WIDTH;
+}
+
+int dolphin_web_efb_height()
+{
+  return EFB_HEIGHT;
+}
+
+int dolphin_web_efb_stride()
+{
+  return EFB_WIDTH * 4;
+}
+
+int dolphin_web_efb_version()
+{
+  return static_cast<int>(s_web_efb_version);
+}
+
+const unsigned char* dolphin_web_efb_buffer()
+{
+  return s_web_efb_snapshot.empty() ? nullptr : s_web_efb_snapshot.data();
+}
+
+int dolphin_web_capture_efb()
+{
+  s_web_efb_snapshot.resize(static_cast<size_t>(EFB_WIDTH) * EFB_HEIGHT * 4);
+
+  for (u32 y = 0; y < EFB_HEIGHT; ++y)
+  {
+    for (u32 x = 0; x < EFB_WIDTH; ++x)
+    {
+      const u32 color = GetColor(static_cast<u16>(x), static_cast<u16>(y));
+      const size_t offset = (static_cast<size_t>(y) * EFB_WIDTH + x) * 4;
+      s_web_efb_snapshot[offset] = static_cast<u8>(color >> 24);
+      s_web_efb_snapshot[offset + 1] = static_cast<u8>(color >> 16);
+      s_web_efb_snapshot[offset + 2] = static_cast<u8>(color >> 8);
+      s_web_efb_snapshot[offset + 3] = static_cast<u8>(color);
+    }
+  }
+
+  ++s_web_efb_version;
+  return static_cast<int>(s_web_efb_version);
+}
+}
+#endif
 
 static u32 VerticalFilter(const std::array<u32, 3>& colors,
                           const std::array<u8, 7>& filterCoefficients)

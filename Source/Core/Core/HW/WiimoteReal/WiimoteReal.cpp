@@ -1,6 +1,194 @@
 // Copyright 2010 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#ifdef __EMSCRIPTEN__
+
+#include "Core/HW/WiimoteReal/WiimoteReal.h"
+
+namespace WiimoteReal
+{
+std::recursive_mutex g_wiimotes_mutex;
+std::unique_ptr<Wiimote> g_wiimotes[MAX_BBMOTES];
+
+Wiimote::Wiimote() = default;
+Wiimote::~Wiimote() = default;
+
+bool Wiimote::GetNextReport(Report* report)
+{
+  return false;
+}
+
+bool Wiimote::IsBalanceBoard()
+{
+  return false;
+}
+
+void Wiimote::InterruptDataOutput(const u8* data, const u32 size)
+{
+}
+
+u8 Wiimote::GetWiimoteDeviceIndex() const
+{
+  return m_bt_device_index;
+}
+
+void Wiimote::SetWiimoteDeviceIndex(u8 index)
+{
+  m_bt_device_index = index;
+}
+
+void Wiimote::PrepareInput(WiimoteEmu::DesiredWiimoteState* target_state,
+                           SensorBarState sensor_bar_state)
+{
+}
+
+void Wiimote::Update(const WiimoteEmu::DesiredWiimoteState& target_state)
+{
+}
+
+void Wiimote::EventLinked()
+{
+}
+
+void Wiimote::EventUnlinked()
+{
+}
+
+WiimoteCommon::ButtonData Wiimote::GetCurrentlyPressedButtons()
+{
+  return {};
+}
+
+void Wiimote::EmuStop()
+{
+}
+
+void Wiimote::EmuResume()
+{
+}
+
+void Wiimote::EmuPause()
+{
+}
+
+bool Wiimote::Connect(int index)
+{
+  return false;
+}
+
+void Wiimote::Prepare()
+{
+}
+
+void Wiimote::QueueReport(WiimoteCommon::OutputReportID rpt_id, const void* data, unsigned int size)
+{
+}
+
+int Wiimote::GetIndex() const
+{
+  return m_index;
+}
+
+void Wiimote::Shutdown()
+{
+}
+
+void WiimoteScanner::StartThread()
+{
+}
+
+void WiimoteScanner::StopThread()
+{
+}
+
+void WiimoteScanner::SetScanMode(WiimoteScanMode scan_mode)
+{
+}
+
+void WiimoteScanner::PopulateDevices()
+{
+}
+
+void WiimoteScanner::ThreadFunc()
+{
+}
+
+void WiimoteScanner::PoolThreadFunc()
+{
+}
+
+void AddWiimoteToPool(std::unique_ptr<Wiimote>)
+{
+}
+
+bool IsValidDeviceName(std::string_view name)
+{
+  return false;
+}
+
+bool IsWiimoteName(std::string_view name)
+{
+  return false;
+}
+
+bool IsBalanceBoardName(std::string_view name)
+{
+  return false;
+}
+
+bool IsNewWiimote(const std::string& identifier)
+{
+  return false;
+}
+
+bool IsKnownDeviceId(const USBUtils::DeviceInfo&)
+{
+  return false;
+}
+
+void HandleWiimoteSourceChange(unsigned int wiimote_number)
+{
+}
+
+void HandleWiimotesInControllerInterfaceSettingChange()
+{
+}
+
+void PopulateDevices()
+{
+}
+
+void ProcessWiimotePool()
+{
+}
+
+void Initialize(::Wiimote::InitializeMode init_mode)
+{
+}
+
+void Stop()
+{
+}
+
+void Shutdown()
+{
+}
+
+void Resume()
+{
+}
+
+void Pause()
+{
+}
+
+void Refresh()
+{
+}
+}  // namespace WiimoteReal
+
+#else
+
 #include "Core/HW/WiimoteReal/WiimoteReal.h"
 
 #include <algorithm>
@@ -1059,3 +1247,5 @@ void HandleWiimotesInControllerInterfaceSettingChange()
 }
 
 }  // namespace WiimoteReal
+
+#endif

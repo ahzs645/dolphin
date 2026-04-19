@@ -592,6 +592,35 @@ add_library(core
   WiiUtils.h
 )
 
+if(EMSCRIPTEN)
+  get_target_property(core_sources core SOURCES)
+  list(REMOVE_ITEM core_sources
+    HW/DVD/AMMediaboard.cpp
+    HW/EXI/BBA/TAPServerConnection.cpp
+    HW/EXI/BBA/TAPServerBBA.cpp
+    HW/EXI/BBA/XLINK_KAI_BBA.cpp
+    HW/EXI/BBA/BuiltIn.cpp
+    HW/EXI/BBA/BuiltIn.h
+    HW/EXI/Modem/TAPServerModem.cpp
+    HW/EXI/EXI_DeviceEthernet.cpp
+    HW/EXI/EXI_DeviceEthernet.h
+    HW/EXI/EXI_DeviceGecko.cpp
+    HW/EXI/EXI_DeviceGecko.h
+    HW/EXI/EXI_DeviceModem.cpp
+    HW/EXI/EXI_DeviceModem.h
+    HW/SI/SI_DeviceGBA.cpp
+    HW/SI/SI_DeviceGBA.h
+    NetPlayClient.cpp
+    NetPlayCommon.cpp
+    NetPlayCommon.h
+    NetPlayServer.cpp
+    NetPlayServer.h
+  )
+  set_property(TARGET core PROPERTY SOURCES ${core_sources})
+  target_sources(core PRIVATE HW/DVD/AMMediaboardStub.cpp)
+  target_sources(core PRIVATE NetPlayStub.cpp)
+endif()
+
 if(_M_X86_64)
   target_sources(core PRIVATE
     DSP/Jit/x64/DSPEmitter.cpp
@@ -679,7 +708,6 @@ PUBLIC
   inputcommon
   MbedTLS::mbedtls
   pugixml
-  sfml-network
   videonull
   videoogl
   videosoftware
@@ -691,6 +719,10 @@ PRIVATE
   LZ4::LZ4
   ZLIB::ZLIB
 )
+
+if(NOT EMSCRIPTEN)
+  target_link_libraries(core PUBLIC sfml-network)
+endif()
 
 if(LIBUDEV_FOUND)
   target_include_directories(core PRIVATE ${LIBUDEV_INCLUDE_DIR})
@@ -772,7 +804,7 @@ elseif(APPLE)
     HW/EXI/BBA/TAP_Apple.cpp
   )
   target_link_libraries(core PUBLIC ${IOB_LIBRARY})
-elseif(UNIX)
+elseif(UNIX AND NOT EMSCRIPTEN)
   target_sources(core PRIVATE
     HW/EXI/BBA/TAP_Unix.cpp
   )

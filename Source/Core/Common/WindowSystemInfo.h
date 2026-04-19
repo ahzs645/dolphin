@@ -11,6 +11,7 @@ enum class WindowSystemType
   Android,
   X11,
   Wayland,
+  Web,
   FBDev,
   Haiku,
 };
@@ -25,15 +26,15 @@ struct WindowSystemInfo
   {
   }
 
-  // Window system type. Determines which GL context or Vulkan WSI is used.
+  // Window system type. Determines which GL context, Vulkan WSI, or browser host is used.
   WindowSystemType type = WindowSystemType::Headless;
 
   // Connection to a display server. This is used on X11 and Wayland platforms.
   void* display_connection = nullptr;
 
-  // Render window. This is a pointer to the native window handle, which depends
-  // on the platform. e.g. HWND for Windows, Window for X11. If the surface is
-  // set to nullptr, the video backend will run in headless mode.
+  // Render window. This is a pointer to the native window or browser host handle, which depends
+  // on the platform. e.g. HWND for Windows, Window for X11. If the surface is set to nullptr,
+  // the selected video backend must either run headless or provide its own presentation path.
   void* render_window = nullptr;
 
   // Render surface. Depending on the host platform, this may differ from the window.

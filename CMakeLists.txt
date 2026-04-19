@@ -33,6 +33,11 @@ if (MSVC)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
+if(EMSCRIPTEN)
+  add_compile_options(-pthread)
+  add_link_options(-pthread)
+endif()
+
 set(COMPILER ${CMAKE_CXX_COMPILER_ID})
 if (COMPILER STREQUAL "GNU")
   set(COMPILER "GCC") # prefer printing GCC instead of GNU
@@ -575,7 +580,7 @@ if(ENABLE_EVDEV)
   endif()
 endif()
 
-if(UNIX)
+if(UNIX AND NOT EMSCRIPTEN)
   message(STATUS "Using named pipes as controller inputs")
   add_definitions(-DUSE_PIPES=1)
   message(STATUS "Watching game memory for changes")
@@ -703,7 +708,7 @@ if(ENABLE_CUBEB)
   add_definitions(-DHAVE_CUBEB)
 endif()
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT EMSCRIPTEN)
   dolphin_find_optional_system_library(LibUSB Externals/libusb)
   add_definitions(-D__LIBUSB__)
 endif()
@@ -712,7 +717,9 @@ if(ENABLE_SDL)
   dolphin_find_optional_system_library(SDL3 Externals/SDL 3.2.0)
 endif()
 
-dolphin_find_optional_system_library(SFML Externals/SFML 3.0 COMPONENTS Network System)
+if(NOT EMSCRIPTEN)
+  dolphin_find_optional_system_library(SFML Externals/SFML 3.0 COMPONENTS Network System)
+endif()
 
 if(USE_UPNP)
   dolphin_find_optional_system_library(MINIUPNPC Externals/miniupnpc 1.6)
@@ -723,7 +730,7 @@ dolphin_find_optional_system_library(MBEDTLS Externals/mbedtls 2.28)
 
 dolphin_find_optional_system_library(CURL Externals/curl)
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT EMSCRIPTEN)
   dolphin_find_optional_system_library(HIDAPI Externals/hidapi)
 endif()
 
@@ -760,7 +767,9 @@ if (USE_RETRO_ACHIEVEMENTS)
   add_subdirectory(Externals/rcheevos)
 endif()
 
-add_subdirectory(Externals/watcher)
+if(NOT EMSCRIPTEN)
+  add_subdirectory(Externals/watcher)
+endif()
 
 # Any other platform or BSD is currently unsupported by cpp-ipc
 if(WIN32 OR LINUX OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD" OR CMAKE_SYSTEM_NAME STREQUAL "QNX")

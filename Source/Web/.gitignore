@@ -1,0 +1,6 @@
+dist/
+node_modules/
+*.tsbuildinfo
+public/dolphin-core/*.wasm
+public/dolphin-core/dolphin-web-core*.js
+public/test-assets/

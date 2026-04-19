@@ -3,7 +3,10 @@
 
 #include "InputCommon/GCAdapter.h"
 
-#ifndef ANDROID
+#if defined(__EMSCRIPTEN__)
+#define GCADAPTER_USE_LIBUSB_IMPLEMENTATION false
+#define GCADAPTER_USE_ANDROID_IMPLEMENTATION false
+#elif !defined(ANDROID)
 #define GCADAPTER_USE_LIBUSB_IMPLEMENTATION true
 #define GCADAPTER_USE_ANDROID_IMPLEMENTATION false
 #else
@@ -538,6 +541,10 @@ void Init()
 
 void StartScanThread()
 {
+#if !GCADAPTER_USE_LIBUSB_IMPLEMENTATION && !GCADAPTER_USE_ANDROID_IMPLEMENTATION
+  return;
+#endif
+
   if (s_adapter_detect_thread_running.IsSet())
     return;
 #if GCADAPTER_USE_LIBUSB_IMPLEMENTATION
@@ -968,7 +975,11 @@ void ResetDeviceType(int chan)
 
 bool UseAdapter()
 {
+#if defined(__EMSCRIPTEN__)
+  return false;
+#else
   return s_is_adapter_wanted;
+#endif
 }
 
 void ResetRumble()
@@ -1068,6 +1079,10 @@ bool IsDetected(const char** error_message)
   return false;
 #elif GCADAPTER_USE_ANDROID_IMPLEMENTATION
   return s_detected;
+#else
+  if (error_message)
+    *error_message = nullptr;
+  return false;
 #endif
 }
 

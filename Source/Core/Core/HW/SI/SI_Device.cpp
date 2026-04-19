@@ -13,7 +13,6 @@
 #include "Common/MsgHandler.h"
 #include "Common/Swap.h"
 #include "Core/HW/SI/SI_DeviceDanceMat.h"
-#include "Core/HW/SI/SI_DeviceGBA.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/SI/SI_DeviceGBAEmu.h"
 #endif
@@ -25,6 +24,10 @@
 #include "Core/HW/SI/SI_DeviceNull.h"
 #include "Core/HW/SystemTimers.h"
 #include "Core/System.h"
+
+#ifndef __EMSCRIPTEN__
+#include "Core/HW/SI/SI_DeviceGBA.h"
+#endif
 
 namespace SerialInterface
 {
@@ -179,7 +182,11 @@ std::unique_ptr<ISIDevice> SIDevice_Create(Core::System& system, const SIDevices
     return std::make_unique<CSIDevice_TaruKonga>(system, device, port_number);
 
   case SIDEVICE_GC_GBA:
+#ifndef __EMSCRIPTEN__
     return std::make_unique<CSIDevice_GBA>(system, device, port_number);
+#else
+    return std::make_unique<CSIDevice_Null>(system, device, port_number);
+#endif
 
   case SIDEVICE_GC_GBA_EMULATED:
 #ifdef HAS_LIBMGBA

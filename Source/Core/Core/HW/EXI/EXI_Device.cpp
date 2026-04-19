@@ -10,13 +10,16 @@
 #include "Core/HW/EXI/EXI_DeviceAGP.h"
 #include "Core/HW/EXI/EXI_DeviceBaseboard.h"
 #include "Core/HW/EXI/EXI_DeviceDummy.h"
-#include "Core/HW/EXI/EXI_DeviceEthernet.h"
-#include "Core/HW/EXI/EXI_DeviceGecko.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
 #include "Core/HW/EXI/EXI_DeviceMemoryCard.h"
-#include "Core/HW/EXI/EXI_DeviceModem.h"
 #include "Core/HW/Memmap.h"
 #include "Core/System.h"
+
+#ifndef __EMSCRIPTEN__
+#include "Core/HW/EXI/EXI_DeviceEthernet.h"
+#include "Core/HW/EXI/EXI_DeviceGecko.h"
+#include "Core/HW/EXI/EXI_DeviceModem.h"
+#endif
 
 #ifdef HAVE_CUBEB
 #include "Core/HW/EXI/EXI_DeviceMic.h"
@@ -146,31 +149,59 @@ std::unique_ptr<IEXIDevice> EXIDevice_Create(Core::System& system, const EXIDevi
     break;
 
   case EXIDeviceType::Ethernet:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIETHERNET>(system, BBADeviceType::TAP);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::EthernetTapServer:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIETHERNET>(system, BBADeviceType::TAPSERVER);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::EthernetXLink:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIETHERNET>(system, BBADeviceType::XLINK);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::EthernetBuiltIn:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIETHERNET>(system, BBADeviceType::BuiltIn);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::EthernetIPC:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIETHERNET>(system, BBADeviceType::IPC);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::ModemTapServer:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIModem>(system, ModemDeviceType::TAPSERVER);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::Gecko:
+#ifndef __EMSCRIPTEN__
     result = std::make_unique<CEXIGecko>(system);
+#else
+    result = std::make_unique<IEXIDevice>(system);
+#endif
     break;
 
   case EXIDeviceType::AGP:

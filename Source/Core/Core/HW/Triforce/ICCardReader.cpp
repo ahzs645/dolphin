@@ -468,7 +468,7 @@ void ICCardReader::Update()
     if (!ic_card)
       break;
 
-    if (!ic_card->WriteData(page, input_payload.subspan(6, PAGE_SIZE)))
+    if (!ic_card->WriteData(page, input_payload.subspan(6, CARD_PAGE_SIZE)))
     {
       status_code = HardwareUntestedErrorCode;
     }
@@ -564,7 +564,7 @@ void ICCardReader::Update()
     if (!ic_card)
       break;
 
-    const u32 byte_count = page_count * PAGE_SIZE;
+    const u32 byte_count = page_count * CARD_PAGE_SIZE;
 
     if (!validate_input_payload_size(8 + byte_count))
       break;
@@ -611,8 +611,8 @@ void ICCardReader::SendReply(u8 command, u16 status_code, std::span<const u8> pa
 
 std::span<const u8> ICCardReader::ICCard::ReadData(u16 page, u16 page_count)
 {
-  const u32 byte_offset = page * PAGE_SIZE;
-  const u32 byte_count = page_count * PAGE_SIZE;
+  const u32 byte_offset = page * CARD_PAGE_SIZE;
+  const u32 byte_count = page_count * CARD_PAGE_SIZE;
 
   if (byte_count + byte_offset > m_data.size())
   {
@@ -629,10 +629,10 @@ std::span<const u8> ICCardReader::ICCard::ReadData(u16 page, u16 page_count)
 
 bool ICCardReader::ICCard::WriteData(u16 page, std::span<const u8> write_span)
 {
-  constexpr u32 read_only_area_begin = READ_ONLY_PAGE_INDEX * PAGE_SIZE;
-  constexpr u32 read_only_area_end = read_only_area_begin + PAGE_SIZE;
+  constexpr u32 read_only_area_begin = READ_ONLY_PAGE_INDEX * CARD_PAGE_SIZE;
+  constexpr u32 read_only_area_end = read_only_area_begin + CARD_PAGE_SIZE;
 
-  const u32 byte_offset = page * PAGE_SIZE;
+  const u32 byte_offset = page * CARD_PAGE_SIZE;
 
   if ((byte_offset < read_only_area_end) &&
       (byte_offset + write_span.size() > read_only_area_begin))
@@ -659,7 +659,7 @@ bool ICCardReader::ICCard::WriteData(u16 page, std::span<const u8> write_span)
 
 u16 ICCardReader::ICCard::DecreaseUseCount(u16 page, u16 amount)
 {
-  const u32 byte_offset = page * PAGE_SIZE;
+  const u32 byte_offset = page * CARD_PAGE_SIZE;
   auto* const addr = m_data.data() + byte_offset;
 
   const u16 previous_use_count = Common::swap16(addr);
@@ -728,7 +728,7 @@ void ICCardReader::ICCard::Initialize()
   {
     NOTICE_LOG_FMT(SERIALINTERFACE_CARD, "Creating new IC Card data.");
     InitializeCardData(m_data);
-    FlushData(READ_ONLY_PAGE_INDEX * PAGE_SIZE, PAGE_SIZE * 2);
+    FlushData(READ_ONLY_PAGE_INDEX * CARD_PAGE_SIZE, CARD_PAGE_SIZE * 2);
   }
 }
 

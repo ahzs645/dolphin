@@ -80,6 +80,11 @@ if(HAVE_ELF_AUX_INFO)
 endif()
 
 add_subdirectory(Core)
+
+if(EMSCRIPTEN)
+  add_subdirectory(Web)
+endif()
+
 if (ANDROID)
   add_subdirectory(Android/jni)
 endif()

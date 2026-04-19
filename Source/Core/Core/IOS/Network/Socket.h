@@ -14,14 +14,14 @@ typedef pollfd pollfd_t;
 #define MALLOC(x) HeapAlloc(GetProcessHeap(), 0, (x))
 #define FREE(x) HeapFree(GetProcessHeap(), 0, (x))
 
-#elif defined(__linux__) or defined(__APPLE__) or defined(__FreeBSD__) or defined(__NetBSD__) or   \
-    defined(__OpenBSD__) or defined(__HAIKU__)
+#elif defined(__linux__) or defined(__EMSCRIPTEN__) or defined(__APPLE__) or defined(__FreeBSD__) or \
+    defined(__NetBSD__) or defined(__OpenBSD__) or defined(__HAIKU__)
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#if defined(ANDROID) || defined(__HAIKU__)
+#if defined(ANDROID) || defined(__EMSCRIPTEN__) || defined(__HAIKU__)
 #include <fcntl.h>
 #else
 #include <sys/fcntl.h>

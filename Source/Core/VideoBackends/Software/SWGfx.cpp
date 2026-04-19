@@ -57,6 +57,11 @@ SWGfx::CreateFramebuffer(AbstractTexture* color_attachment, AbstractTexture* dep
 
 bool SWGfx::BindBackbuffer(const ClearColor& clear_color)
 {
+#ifdef __EMSCRIPTEN__
+  if (g_presenter->SurfaceResizedTestAndClear())
+    g_presenter->SetBackbuffer(m_window->GetBackBufferWidth(), m_window->GetBackBufferHeight());
+  return true;
+#else
   // Look for framebuffer resizes
   if (!g_presenter->SurfaceResizedTestAndClear())
     return true;
@@ -65,6 +70,7 @@ bool SWGfx::BindBackbuffer(const ClearColor& clear_color)
   context->Update();
   g_presenter->SetBackbuffer(context->GetBackBufferWidth(), context->GetBackBufferHeight());
   return true;
+#endif
 }
 
 class SWShader final : public AbstractShader
@@ -136,9 +142,14 @@ void SWGfx::SetScissorRect(const MathUtil::Rectangle<int>& rc)
 
 SurfaceInfo SWGfx::GetSurfaceInfo() const
 {
+#ifdef __EMSCRIPTEN__
+  return {std::max(m_window->GetBackBufferWidth(), 1u),
+          std::max(m_window->GetBackBufferHeight(), 1u), 1.0f, AbstractTextureFormat::RGBA8};
+#else
   GLContext* context = m_window->GetContext();
   return {std::max(context->GetBackBufferWidth(), 1u), std::max(context->GetBackBufferHeight(), 1u),
           1.0f, AbstractTextureFormat::RGBA8};
+#endif
 }
 
 }  // namespace SW

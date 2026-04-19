@@ -23,8 +23,9 @@
 #include <sys/sysctl.h>
 #elif defined __HAIKU__
 #include <OS.h>
-#else
+#elif !defined(__EMSCRIPTEN__)
 #include <sys/sysinfo.h>
+#else
 #endif
 #endif
 
@@ -275,6 +276,8 @@ size_t MemPhysical()
   system_info sysinfo;
   get_system_info(&sysinfo);
   return static_cast<size_t>(sysinfo.max_pages * B_PAGE_SIZE);
+#elif defined __EMSCRIPTEN__
+  return 512 * 1024 * 1024;
 #else
   struct sysinfo memInfo;
   sysinfo(&memInfo);

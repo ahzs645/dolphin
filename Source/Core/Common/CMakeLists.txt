@@ -65,8 +65,6 @@ add_library(common
   FatFsUtil.h
   FileSearch.cpp
   FileSearch.h
-  FilesystemWatcher.cpp
-  FilesystemWatcher.h
   FileUtil.cpp
   FileUtil.h
   FixedSizeQueue.h
@@ -170,6 +168,20 @@ add_library(common
 
 add_dependencies(common dolphin_scmrev)
 
+if(EMSCRIPTEN)
+  get_target_property(common_sources common SOURCES)
+  list(REMOVE_ITEM common_sources
+    ENet.cpp
+    ENet.h
+    SFMLHelper.cpp
+    SFMLHelper.h
+    TraversalClient.cpp
+    TraversalClient.h
+  )
+  set_property(TARGET common PROPERTY SOURCES ${common_sources})
+  target_sources(common PRIVATE FilesystemWatcherStub.cpp)
+endif()
+
 if(NOT MSVC AND _M_ARM_64)
   set_source_files_properties(
     Crypto/AES.cpp
@@ -184,15 +196,25 @@ PUBLIC
   fmt::fmt
   MbedTLS::mbedtls
   MINIZIP::minizip-ng
-  sfml-network
 
 PRIVATE
   CURL::libcurl
   FatFs
   spng::spng
-  watcher
   ${VTUNE_LIBRARIES}
 )
+
+if(NOT EMSCRIPTEN)
+  target_link_libraries(common PUBLIC sfml-network)
+endif()
+
+if(NOT EMSCRIPTEN)
+  target_sources(common PRIVATE
+    FilesystemWatcher.cpp
+    FilesystemWatcher.h
+  )
+  target_link_libraries(common PRIVATE watcher)
+endif()
 
 if ((DEFINED CMAKE_ANDROID_ARCH_ABI AND CMAKE_ANDROID_ARCH_ABI MATCHES "x86|x86_64") OR
     (NOT DEFINED CMAKE_ANDROID_ARCH_ABI AND _M_X86_64))

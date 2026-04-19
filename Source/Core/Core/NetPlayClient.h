@@ -3,6 +3,39 @@
 
 #pragma once
 
+#ifdef __EMSCRIPTEN__
+
+#include <span>
+
+#include "Core/NetPlayProto.h"
+
+namespace WiimoteEmu
+{
+struct SerializedWiimoteState;
+}
+
+namespace NetPlay
+{
+class NetPlayClient
+{
+public:
+  struct WiimoteDataBatchEntry
+  {
+    int wiimote = 0;
+    WiimoteEmu::SerializedWiimoteState* state = nullptr;
+  };
+
+  static void SendTimeBase() {}
+};
+
+void NetPlay_Enable(NetPlayClient* const np);
+void NetPlay_Disable();
+bool NetPlay_GetWiimoteData(const std::span<NetPlayClient::WiimoteDataBatchEntry>& entries);
+unsigned int NetPlay_GetLocalWiimoteForSlot(unsigned int slot);
+}  // namespace NetPlay
+
+#else
+
 #include <SFML/Network/Packet.hpp>
 #include <array>
 #include <chrono>
@@ -356,3 +389,5 @@ void NetPlay_Disable();
 bool NetPlay_GetWiimoteData(const std::span<NetPlayClient::WiimoteDataBatchEntry>& entries);
 unsigned int NetPlay_GetLocalWiimoteForSlot(unsigned int slot);
 }  // namespace NetPlay
+
+#endif

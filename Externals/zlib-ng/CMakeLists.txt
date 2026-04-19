@@ -2,6 +2,10 @@ set(ZLIB_ENABLE_TESTS OFF)
 set(ZLIB_COMPAT ON)
 set(SKIP_INSTALL_ALL ON)
 
+if(EMSCRIPTEN)
+  set(WITH_OPTIM OFF CACHE BOOL "Use generic zlib-ng sources for WebAssembly" FORCE)
+endif()
+
 option(BUILD_SHARED_LIBS "Build shared library" OFF)
 
 add_subdirectory(zlib-ng)

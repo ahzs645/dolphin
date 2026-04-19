@@ -51,9 +51,6 @@ add_library(inputcommon
   ControllerEmu/ControlGroup/Triggers.h
   ControllerEmu/Setting/NumericSetting.cpp
   ControllerEmu/Setting/NumericSetting.h
-  ControllerInterface/DualShockUDPClient/DualShockUDPClient.cpp
-  ControllerInterface/DualShockUDPClient/DualShockUDPClient.h
-  ControllerInterface/DualShockUDPClient/DualShockUDPProto.h
   ControllerInterface/ControllerInterface.cpp
   ControllerInterface/ControllerInterface.h
   ControllerInterface/CoreDevice.cpp
@@ -77,15 +74,26 @@ add_library(inputcommon
   DynamicInputTextures/DITSpecification.h
 )
 
+if(NOT EMSCRIPTEN)
+  target_sources(inputcommon PRIVATE
+    ControllerInterface/DualShockUDPClient/DualShockUDPClient.cpp
+    ControllerInterface/DualShockUDPClient/DualShockUDPClient.h
+    ControllerInterface/DualShockUDPClient/DualShockUDPProto.h
+  )
+endif()
+
 target_link_libraries(inputcommon
 PUBLIC
   common
 
 PRIVATE
   fmt::fmt
-  sfml-network
   spng::spng
 )
+
+if(NOT EMSCRIPTEN)
+  target_link_libraries(inputcommon PRIVATE sfml-network)
+endif()
 
 if(WIN32)
   target_sources(inputcommon PRIVATE
@@ -131,6 +139,11 @@ elseif(X11_FOUND)
     ControllerInterface/Xlib/XInput2.h
   )
   target_link_libraries(inputcommon PRIVATE PkgConfig::X11_INPUT)
+elseif(EMSCRIPTEN)
+  target_sources(inputcommon PRIVATE
+    ControllerInterface/Touch/InputOverrider.cpp
+    ControllerInterface/Touch/InputOverrider.h
+  )
 elseif(ANDROID)
   target_compile_definitions(inputcommon PRIVATE -DCIFACE_USE_ANDROID)
   target_sources(inputcommon PRIVATE
@@ -144,7 +157,7 @@ elseif(ANDROID)
   )
 endif()
 
-if(NOT ANDROID)
+if(TARGET LibUSB::LibUSB)
   target_link_libraries(inputcommon PUBLIC LibUSB::LibUSB)
 endif()
 

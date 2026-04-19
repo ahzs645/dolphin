@@ -23,11 +23,15 @@
 #include "Core/CoreTiming.h"
 #include "Core/HW/MMIO.h"
 #include "Core/HW/ProcessorInterface.h"
-#include "Core/HW/SI/SI_DeviceGBA.h"
+#include "Core/HW/SI/SI_Device.h"
 #include "Core/HW/SystemTimers.h"
 #include "Core/Movie.h"
 #include "Core/NetPlayProto.h"
 #include "Core/System.h"
+
+#ifndef __EMSCRIPTEN__
+#include "Core/HW/SI/SI_DeviceGBA.h"
+#endif
 
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 
@@ -317,7 +321,9 @@ void SerialInterfaceManager::Shutdown()
 {
   for (int i = 0; i < MAX_SI_CHANNELS; i++)
     RemoveDevice(i);
+#ifndef __EMSCRIPTEN__
   GBAConnectionWaiter_Shutdown();
+#endif
 }
 
 void SerialInterfaceManager::RegisterMMIO(MMIO::Mapping* mmio, u32 base)

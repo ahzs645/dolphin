@@ -39,6 +39,10 @@ PUBLIC
   videocommon
 )
 
+if(EMSCRIPTEN)
+  target_compile_options(videosoftware PRIVATE -msimd128)
+endif()
+
 if(MSVC)
   # Add precompiled header
   target_link_libraries(videosoftware PRIVATE use_pch)

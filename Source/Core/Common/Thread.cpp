@@ -168,7 +168,9 @@ void SwitchCurrentThread()
 
 void SetCurrentThreadName(const char* name)
 {
-#ifdef __APPLE__
+#ifdef __EMSCRIPTEN__
+  (void)name;
+#elif defined __APPLE__
   pthread_setname_np(name);
 #elif defined __FreeBSD__ || defined __OpenBSD__
   pthread_set_name_np(pthread_self(), name);

@@ -250,6 +250,18 @@ PRIVATE
   tinygltf
 )
 
+if(EMSCRIPTEN)
+  get_target_property(videocommon_sources videocommon SOURCES)
+  list(REMOVE_ITEM videocommon_sources
+    NetPlayChatUI.cpp
+    NetPlayChatUI.h
+    NetPlayGolfUI.cpp
+    NetPlayGolfUI.h
+  )
+  set_property(TARGET videocommon PROPERTY SOURCES ${videocommon_sources})
+  target_sources(videocommon PRIVATE NetPlayUIStub.cpp)
+endif()
+
 if(_M_X86_64)
   target_sources(videocommon PRIVATE
     TextureDecoder_x64.cpp
