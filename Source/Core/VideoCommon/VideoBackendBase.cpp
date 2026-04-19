@@ -11,6 +11,10 @@
 
 #include <fmt/format.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/console.h>
+#endif
+
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
@@ -34,6 +38,9 @@
 #ifdef HAS_OPENGL
 #include "VideoBackends/OGL/VideoBackend.h"
 #include "VideoBackends/Software/VideoBackend.h"
+#endif
+#if defined(__EMSCRIPTEN__)
+#include "VideoBackends/WebGL/VideoBackend.h"
 #endif
 #ifdef HAS_VULKAN
 #include "VideoBackends/Vulkan/VideoBackend.h"
@@ -226,6 +233,9 @@ const std::vector<std::unique_ptr<VideoBackendBase>>& VideoBackendBase::GetAvail
 #ifdef HAS_OPENGL
     backends.push_back(std::make_unique<SW::VideoSoftware>());
 #endif
+#if defined(__EMSCRIPTEN__)
+    backends.push_back(std::make_unique<WebGL::VideoBackend>());
+#endif
     backends.push_back(std::make_unique<Null::VideoBackend>());
 
     if (!backends.empty())
@@ -329,16 +339,33 @@ bool VideoBackendBase::InitializeShared(std::unique_ptr<AbstractGfx> gfx,
   g_graphics_mod_manager = std::make_unique<GraphicsModManager>();
   g_widescreen = std::make_unique<WidescreenManager>();
 
-  if (!g_vertex_manager->Initialize() || !g_shader_cache->Initialize() ||
-      !g_perf_query->Initialize() || !g_presenter->Initialize() ||
-      !g_framebuffer_manager->Initialize(g_ActiveConfig.iEFBScale) ||
-      !g_texture_cache->Initialize() ||
-      (g_backend_info.bSupportsBBox && !g_bounding_box->Initialize()) ||
-      !g_graphics_mod_manager->Initialize())
-  {
+  auto fail_initialization = [this](const char* step) {
+#ifdef __EMSCRIPTEN__
+    if (g_video_backend && g_video_backend->GetConfigName() == "WebGL2")
+      emscripten_console_warn(fmt::format("WebGL2 backend initialization failed at {}", step).c_str());
+#endif
     PanicAlertFmtT("Failed to initialize renderer classes");
     Shutdown();
     return false;
+  };
+
+  if (!g_vertex_manager->Initialize())
+    return fail_initialization("VertexManager");
+  if (!g_shader_cache->Initialize())
+    return fail_initialization("ShaderCache");
+  if (!g_perf_query->Initialize())
+    return fail_initialization("PerfQuery");
+  if (!g_presenter->Initialize())
+    return fail_initialization("Presenter");
+  if (!g_framebuffer_manager->Initialize(g_ActiveConfig.iEFBScale))
+    return fail_initialization("FramebufferManager");
+  if (!g_texture_cache->Initialize())
+    return fail_initialization("TextureCache");
+  if (g_backend_info.bSupportsBBox && !g_bounding_box->Initialize())
+    return fail_initialization("BoundingBox");
+  if (!g_graphics_mod_manager->Initialize())
+  {
+    return fail_initialization("GraphicsModManager");
   }
 
   auto& system = Core::System::GetInstance();

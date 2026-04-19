@@ -1,6 +1,7 @@
 // Copyright 2026 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <emscripten/console.h>
 #include <emscripten/emscripten.h>
 
 #include <algorithm>
@@ -26,6 +27,7 @@
 
 #include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/VideoBackendBase.h"
+#include "VideoCommon/WebPerfMetrics.h"
 
 namespace
 {
@@ -118,12 +120,21 @@ void UnregisterWebWiiInput()
   s_web_wii_input_registered = false;
 }
 
-void ApplyWebPerformanceConfig()
+void ApplyWebPerformanceConfig(bool enable_mmu)
 {
   Config::SetCurrent(Config::MAIN_CPU_CORE, PowerPC::CPUCore::CachedInterpreter);
   Config::SetCurrent(Config::MAIN_CPU_THREAD, true);
   Config::SetCurrent(Config::MAIN_DSP_HLE, true);
   Config::SetCurrent(Config::MAIN_DSP_THREAD, true);
+  Config::SetCurrent(Config::MAIN_MMU, enable_mmu);
+  Config::SetCurrent(Config::MAIN_PAUSE_ON_PANIC, false);
+
+  if (enable_mmu)
+  {
+    Config::SetCurrent(Config::MAIN_FASTMEM, false);
+    Config::SetCurrent(Config::MAIN_PAGE_TABLE_FASTMEM, false);
+    Config::SetCurrent(Config::MAIN_FASTMEM_ARENA, false);
+  }
 }
 }  // namespace
 
@@ -149,7 +160,7 @@ EMSCRIPTEN_KEEPALIVE int dolphin_web_state()
   return GetCoreState();
 }
 
-EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize()
+EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize_with_options(const char* renderer_name, int enable_mmu)
 {
   if (s_ui_initialized)
   {
@@ -157,22 +168,40 @@ EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize()
     return 1;
   }
 
+  const std::string renderer =
+      renderer_name && renderer_name[0] != '\0' ? renderer_name : "Software Renderer";
   const WindowSystemInfo wsi = MakeWebWindowSystemInfo();
 
   UICommon::SetUserDirectory("/dolphin-user");
   UICommon::Init();
 
-  ApplyWebPerformanceConfig();
-  Config::SetCurrent(Config::MAIN_GFX_BACKEND, std::string("Software Renderer"));
-  VideoBackendBase::ActivateBackend("Software Renderer");
+  ApplyWebPerformanceConfig(enable_mmu != 0);
+  Config::SetCurrent(Config::MAIN_GFX_BACKEND, renderer);
+  VideoBackendBase::ActivateBackend(renderer);
+  emscripten_console_warn(
+      ("Dolphin web requested renderer: " + renderer + ", active backend: " +
+       (g_video_backend ? g_video_backend->GetConfigName() : std::string("<none>")) +
+       ", MMU: " + (enable_mmu != 0 ? "on" : "off"))
+          .c_str());
 
   UICommon::InitControllers(wsi);
   RegisterWebWiiInput();
 
   s_ui_initialized = true;
-  SetStatus("Dolphin UICommon initialized with the browser software renderer and mouse-backed "
-            "Wii Remote input.");
+  SetStatus("Dolphin UICommon initialized with the browser " + renderer +
+            " renderer, " + (enable_mmu != 0 ? "MMU enabled" : "MMU disabled") +
+            ", and mouse-backed Wii Remote input.");
   return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize_with_renderer(const char* renderer_name)
+{
+  return dolphin_web_initialize_with_options(renderer_name, 0);
+}
+
+EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize()
+{
+  return dolphin_web_initialize_with_renderer("Software Renderer");
 }
 
 EMSCRIPTEN_KEEPALIVE int dolphin_web_set_wiimote_mouse(int wiimote_index, int x, int y,
@@ -228,6 +257,7 @@ EMSCRIPTEN_KEEPALIVE int boot_wii_menu()
   }
 
   auto boot = std::make_unique<BootParameters>(BootParameters::NANDTitle{Titles::SYSTEM_MENU});
+  WebPerfMetrics::Reset();
   if (!BootManager::BootCore(system, std::move(boot), MakeWebWindowSystemInfo()))
   {
     SetStatus("BootCore rejected the Wii Menu title. A browser-mounted Wii NAND is required.");
@@ -264,6 +294,7 @@ EMSCRIPTEN_KEEPALIVE int dolphin_web_boot_path(const char* path)
     return -31;
   }
 
+  WebPerfMetrics::Reset();
   if (!BootManager::BootCore(system, std::move(boot), MakeWebWindowSystemInfo()))
   {
     SetStatus(std::string("BootCore rejected boot file: ") + path);

@@ -120,15 +120,18 @@ bool Presenter::Initialize()
   {
     SetBackbuffer(g_gfx->GetSurfaceInfo());
 
-    m_post_processor = std::make_unique<VideoCommon::PostProcessing>();
-    if (!m_post_processor->Initialize(m_backbuffer_format))
-      return false;
+    if (g_gfx->SupportsUtilityDrawing())
+    {
+      m_post_processor = std::make_unique<VideoCommon::PostProcessing>();
+      if (!m_post_processor->Initialize(m_backbuffer_format))
+        return false;
 
-    m_onscreen_ui = std::make_unique<OnScreenUI>();
-    if (!m_onscreen_ui->Initialize(m_backbuffer_width, m_backbuffer_height, m_backbuffer_scale))
-      return false;
+      m_onscreen_ui = std::make_unique<OnScreenUI>();
+      if (!m_onscreen_ui->Initialize(m_backbuffer_width, m_backbuffer_height, m_backbuffer_scale))
+        return false;
+    }
 
-    // Draw a blank frame (and complete OnScreenUI initialization)
+    // Draw a blank frame.
     g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
     g_gfx->PresentBackbuffer();
   }

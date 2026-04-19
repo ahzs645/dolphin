@@ -3,6 +3,9 @@
 
 #include "VideoBackends/Software/SWVertexLoader.h"
 
+#ifdef __EMSCRIPTEN__
+#include <chrono>
+#endif
 #include <cstddef>
 #include <limits>
 
@@ -25,6 +28,7 @@
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/WebPerfMetrics.h"
 #include "VideoCommon/XFMemory.h"
 
 SWVertexLoader::SWVertexLoader() = default;
@@ -40,6 +44,9 @@ DataReader SWVertexLoader::PrepareForAdditionalData(OpcodeDecoder::Primitive pri
 
 void SWVertexLoader::DrawCurrentBatch(u32 base_index, u32 num_indices, u32 base_vertex)
 {
+#ifdef __EMSCRIPTEN__
+  const auto batch_start = std::chrono::steady_clock::now();
+#endif
   using OpcodeDecoder::Primitive;
   Primitive primitive_type = Primitive::GX_DRAW_QUADS;
   switch (m_current_primitive_type)
@@ -65,7 +72,8 @@ void SWVertexLoader::DrawCurrentBatch(u32 base_index, u32 num_indices, u32 base_
   m_setup_unit.Init(primitive_type);
   Rasterizer::SetTevKonstColors();
 
-  for (u32 i = 0; i < m_index_generator.GetIndexLen(); i++)
+  const u32 index_len = m_index_generator.GetIndexLen();
+  for (u32 i = 0; i < index_len; i++)
   {
     const u16 index = m_cpu_index_buffer[i];
     memset(static_cast<void*>(&m_vertex), 0, sizeof(m_vertex));
@@ -88,6 +96,11 @@ void SWVertexLoader::DrawCurrentBatch(u32 base_index, u32 num_indices, u32 base_
   }
 
   INCSTAT(g_stats.this_frame.num_drawn_objects);
+#ifdef __EMSCRIPTEN__
+  const auto batch_end = std::chrono::steady_clock::now();
+  WebPerfMetrics::NoteSoftwareRasterizerTime(
+      std::chrono::duration<double, std::milli>(batch_end - batch_start).count(), 1, index_len);
+#endif
 }
 
 void SWVertexLoader::SetFormat()

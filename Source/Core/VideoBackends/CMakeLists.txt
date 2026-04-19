@@ -2,6 +2,10 @@ add_subdirectory(OGL)
 add_subdirectory(Null)
 add_subdirectory(Software)
 
+if(EMSCRIPTEN)
+  add_subdirectory(WebGL)
+endif()
+
 if(WIN32)
   add_subdirectory(D3DCommon)
   add_subdirectory(D3D)

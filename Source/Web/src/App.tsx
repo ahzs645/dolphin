@@ -75,14 +75,67 @@ type NandMount = { name: string; fileCount: number; bytes: number };
 type WiimotePointerState = { x: number; y: number; buttons: number; active: boolean };
 type FrameStats = { fps: number; frames: number; lastVersion: number; sampleMs: number };
 type CorePerfStats = { fps: number; vps: number; speed: number; maxSpeed: number };
-type FramePresenterMode = 'WebGL2 blit' | 'Canvas 2D';
+type NativeFrameStats = {
+  copyCount: number;
+  copyMs: number;
+  copyMiB: number;
+  cpuMs: number;
+  cpuSamples: number;
+  swRasterMs: number;
+  swRasterBatches: number;
+  swRasterVertices: number;
+  webglUploadMs: number;
+  webglUploadMiB: number;
+  webglUploads: number;
+  webglPresentMs: number;
+  webglPresents: number;
+  xfbCopyMs: number;
+  xfbCopyMiB: number;
+  xfbCopies: number;
+  presentedFrames: number;
+};
+type DrawMetrics = { uploadMs: number; totalMs: number; bytes: number };
+type FrameDrawResult = {
+  drawn: boolean;
+  version: number;
+  label: string;
+  source: 'xfb' | 'efb' | 'none';
+  draw?: DrawMetrics;
+  efbCaptureMs?: number;
+};
+type BenchmarkStats = {
+  draws: number;
+  avgDrawMs: number;
+  avgUploadMs: number;
+  ccallCount: number;
+  ccallRate: number;
+  ccallMs: number;
+  ccallMsRate: number;
+  avgCcallMs: number;
+  efbSnapshots: number;
+  avgEfbCaptureMs: number;
+  nativeCopies: number;
+  avgNativeCopyMs: number;
+  nativeCopyMiB: number;
+  cpuMsRate: number;
+  swRasterMsRate: number;
+  swRasterBatchesRate: number;
+  avgSwRasterMs: number;
+  webglUploadMsPerFrame: number;
+  webglPresentMsPerFrame: number;
+  xfbCopyMsPerFrame: number;
+  sampleMs: number;
+};
+type FramePresenterMode = 'WebGL2 blit' | 'Canvas 2D' | 'Native WebGL2 backend';
 type FramePresenter = {
   mode: FramePresenterMode;
-  draw: (module: DolphinCoreModule, pointer: number, width: number, height: number, stride: number) => void;
+  draw: (module: DolphinCoreModule, pointer: number, width: number, height: number, stride: number) => DrawMetrics;
 };
 
 const REAL_CORE_JS_URL = '/dolphin-core/dolphin-web-core.js';
 const STUB_CORE_WASM_URL = '/dolphin-core/dolphin.wasm';
+const RENDERER_QUERY_PARAM = 'renderer';
+const MMU_QUERY_PARAM = 'mmu';
 const CORE_STATE_LABELS = ['Uninitialized', 'Paused', 'Running', 'Stopping', 'Starting'];
 const BOOT_FILE_DIR = '/dolphin-user/import';
 const MAX_BOOT_COPY_BYTES = 256 * 1024 * 1024;
@@ -91,6 +144,51 @@ const PRESENTATION_INTERVAL_MS = 1000 / 30;
 const EFB_SNAPSHOT_INTERVAL_MS = 250;
 const EMPTY_FRAME_STATS: FrameStats = { fps: 0, frames: 0, lastVersion: 0, sampleMs: 0 };
 const EMPTY_CORE_PERF_STATS: CorePerfStats = { fps: 0, vps: 0, speed: 0, maxSpeed: 0 };
+const EMPTY_NATIVE_FRAME_STATS: NativeFrameStats = {
+  copyCount: 0,
+  copyMs: 0,
+  copyMiB: 0,
+  cpuMs: 0,
+  cpuSamples: 0,
+  swRasterMs: 0,
+  swRasterBatches: 0,
+  swRasterVertices: 0,
+  webglUploadMs: 0,
+  webglUploadMiB: 0,
+  webglUploads: 0,
+  webglPresentMs: 0,
+  webglPresents: 0,
+  xfbCopyMs: 0,
+  xfbCopyMiB: 0,
+  xfbCopies: 0,
+  presentedFrames: 0
+};
+const EMPTY_BENCHMARK_STATS: BenchmarkStats = {
+  draws: 0,
+  avgDrawMs: 0,
+  avgUploadMs: 0,
+  ccallCount: 0,
+  ccallRate: 0,
+  ccallMs: 0,
+  ccallMsRate: 0,
+  avgCcallMs: 0,
+  efbSnapshots: 0,
+  avgEfbCaptureMs: 0,
+  nativeCopies: 0,
+  avgNativeCopyMs: 0,
+  nativeCopyMiB: 0,
+  cpuMsRate: 0,
+  swRasterMsRate: 0,
+  swRasterBatchesRate: 0,
+  avgSwRasterMs: 0,
+  webglUploadMsPerFrame: 0,
+  webglPresentMsPerFrame: 0,
+  xfbCopyMsPerFrame: 0,
+  sampleMs: 0
+};
+
+let dolphinWebCcallCount = 0;
+let dolphinWebCcallMilliseconds = 0;
 
 declare global {
   interface Window {
@@ -99,6 +197,7 @@ declare global {
     __dolphinCoreModule?: DolphinCoreModule;
     __dolphinFrameStats?: FrameStats;
     __dolphinPerfStats?: CorePerfStats;
+    __dolphinBenchmarkStats?: BenchmarkStats;
     __dolphinFramePresenterMode?: FramePresenterMode;
   }
 }
@@ -154,12 +253,38 @@ function coreSpeedLabel(stats: CorePerfStats): string {
   return stats.speed > 0 ? `${(stats.speed * 100).toFixed(0)}%` : 'Measuring';
 }
 
+function millisecondsLabel(value: number): string {
+  return value > 0 ? `${value.toFixed(2)} ms` : '0.00 ms';
+}
+
 function readCorePerfStats(module: DolphinCoreModule): CorePerfStats {
   return {
     fps: ccallNumber(module, 'dolphin_web_perf_fps'),
     vps: ccallNumber(module, 'dolphin_web_perf_vps'),
     speed: ccallNumber(module, 'dolphin_web_perf_speed'),
     maxSpeed: ccallNumber(module, 'dolphin_web_perf_max_speed')
+  };
+}
+
+function readNativeFrameStats(module: DolphinCoreModule): NativeFrameStats {
+  return {
+    copyCount: ccallNumber(module, 'dolphin_web_frame_copy_count'),
+    copyMs: ccallNumber(module, 'dolphin_web_frame_copy_milliseconds'),
+    copyMiB: ccallNumber(module, 'dolphin_web_frame_copy_megabytes'),
+    cpuMs: ccallNumber(module, 'dolphin_web_perf_cpu_milliseconds'),
+    cpuSamples: ccallNumber(module, 'dolphin_web_perf_cpu_samples'),
+    swRasterMs: ccallNumber(module, 'dolphin_web_perf_sw_raster_milliseconds'),
+    swRasterBatches: ccallNumber(module, 'dolphin_web_perf_sw_raster_batches'),
+    swRasterVertices: ccallNumber(module, 'dolphin_web_perf_sw_raster_vertices'),
+    webglUploadMs: ccallNumber(module, 'dolphin_web_perf_webgl_upload_milliseconds'),
+    webglUploadMiB: ccallNumber(module, 'dolphin_web_perf_webgl_upload_megabytes'),
+    webglUploads: ccallNumber(module, 'dolphin_web_perf_webgl_uploads'),
+    webglPresentMs: ccallNumber(module, 'dolphin_web_perf_webgl_present_milliseconds'),
+    webglPresents: ccallNumber(module, 'dolphin_web_perf_webgl_presents'),
+    xfbCopyMs: ccallNumber(module, 'dolphin_web_perf_xfb_copy_milliseconds'),
+    xfbCopyMiB: ccallNumber(module, 'dolphin_web_perf_xfb_copy_megabytes'),
+    xfbCopies: ccallNumber(module, 'dolphin_web_perf_xfb_copies'),
+    presentedFrames: ccallNumber(module, 'dolphin_web_perf_presented_frames')
   };
 }
 
@@ -179,7 +304,10 @@ async function loadRealDolphinCore(): Promise<DolphinCoreModule> {
   return factory({
     locateFile: (fileName: string) => `/dolphin-core/${fileName}`,
     print: (message: string) => console.log(`[dolphin] ${message}`),
-    printErr: (message: string) => console.warn(`[dolphin] ${message}`)
+    printErr: (message: string) => {
+      console.warn(`[dolphin] ${message}`);
+      window.dispatchEvent(new CustomEvent('dolphin-core-stderr', { detail: message }));
+    }
   });
 }
 
@@ -220,12 +348,62 @@ function loadRealDolphinCoreFactory(): Promise<DolphinCoreFactory> {
 }
 
 function ccallNumber(module: DolphinCoreModule, ident: string): number {
-  return Number(module.ccall(ident, 'number', [], []));
+  const startedAt = performance.now();
+  try {
+    return Number(module.ccall(ident, 'number', [], []));
+  } finally {
+    dolphinWebCcallCount += 1;
+    dolphinWebCcallMilliseconds += performance.now() - startedAt;
+  }
 }
 
 function ccallString(module: DolphinCoreModule, ident: string): string {
-  const value = module.ccall(ident, 'string', [], []);
-  return typeof value === 'string' ? value : '';
+  const startedAt = performance.now();
+  try {
+    const value = module.ccall(ident, 'string', [], []);
+    return typeof value === 'string' ? value : '';
+  } finally {
+    dolphinWebCcallCount += 1;
+    dolphinWebCcallMilliseconds += performance.now() - startedAt;
+  }
+}
+
+function getRequestedCoreRenderer(): string {
+  const renderer = new URLSearchParams(window.location.search)
+    .get(RENDERER_QUERY_PARAM)
+    ?.toLowerCase();
+  return renderer === 'software' || renderer === 'sw' ? 'Software Renderer' : 'WebGL2';
+}
+
+function isTruthyQueryParam(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}
+
+function isMmuRequested(): boolean {
+  return isTruthyQueryParam(new URLSearchParams(window.location.search).get(MMU_QUERY_PARAM));
+}
+
+function initializeCoreRenderer(module: DolphinCoreModule): number {
+  const renderer = getRequestedCoreRenderer();
+  const enableMmu = isMmuRequested() ? 1 : 0;
+
+  const startedAt = performance.now();
+  try {
+    return Number(
+      module.ccall('dolphin_web_initialize_with_options', 'number', ['string', 'number'], [renderer, enableMmu])
+    );
+  } finally {
+    dolphinWebCcallCount += 1;
+    dolphinWebCcallMilliseconds += performance.now() - startedAt;
+  }
+}
+
+function isNativeWebGL2CoreRenderer(): boolean {
+  return getRequestedCoreRenderer() === 'WebGL2';
 }
 
 function createShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -322,6 +500,7 @@ function createFramePresenter(canvas: HTMLCanvasElement): FramePresenter {
   return {
     mode: 'WebGL2 blit',
     draw(module, pointer, width, height, stride) {
+      const startedAt = performance.now();
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -343,6 +522,7 @@ function createFramePresenter(canvas: HTMLCanvasElement): FramePresenter {
         textureHeight = height;
       }
 
+      const uploadStartedAt = performance.now();
       if (stride % 4 === 0) {
         gl.pixelStorei(gl.UNPACK_ROW_LENGTH, stride / 4);
         gl.texSubImage2D(
@@ -371,7 +551,9 @@ function createFramePresenter(canvas: HTMLCanvasElement): FramePresenter {
         );
       }
 
+      const uploadMs = performance.now() - uploadStartedAt;
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return { uploadMs, totalMs: performance.now() - startedAt, bytes: stride * height };
     }
   };
 }
@@ -387,6 +569,7 @@ function createCanvas2dPresenter(canvas: HTMLCanvasElement): FramePresenter {
   return {
     mode: 'Canvas 2D',
     draw(module, pointer, width, height, stride) {
+      const startedAt = performance.now();
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -394,8 +577,10 @@ function createCanvas2dPresenter(canvas: HTMLCanvasElement): FramePresenter {
       }
 
       imageData ??= new ImageData(width, height);
+      const uploadStartedAt = performance.now();
       copyRgbaRows(module.HEAPU8, pointer, width, height, stride, imageData.data);
       context.putImageData(imageData, 0, 0);
+      return { uploadMs: performance.now() - uploadStartedAt, totalMs: performance.now() - startedAt, bytes: stride * height };
     }
   };
 }
@@ -433,13 +618,15 @@ function drawLatestFrame(
   presenter: FramePresenter,
   previousVersion: number,
   allowEfbSnapshot: boolean
-): { drawn: boolean; version: number; label: string } {
+): FrameDrawResult {
   if (ccallNumber(module, 'dolphin_web_has_frame') !== 1) {
     if (!allowEfbSnapshot) {
-      return { drawn: false, version: previousVersion, label: 'Waiting for XFB frame' };
+      return { drawn: false, version: previousVersion, label: 'Waiting for XFB frame', source: 'none' };
     }
 
+    const efbCaptureStartedAt = performance.now();
     ccallNumber(module, 'dolphin_web_capture_efb');
+    const efbCaptureMs = performance.now() - efbCaptureStartedAt;
     const efbWidth = ccallNumber(module, 'dolphin_web_efb_width');
     const efbHeight = ccallNumber(module, 'dolphin_web_efb_height');
     const efbStride = ccallNumber(module, 'dolphin_web_efb_stride');
@@ -447,11 +634,17 @@ function drawLatestFrame(
     const label = `EFB snapshot ${efbWidth}x${efbHeight}`;
 
     if (efbWidth <= 0 || efbHeight <= 0 || efbStride < efbWidth * 4 || efbPointer <= 0) {
-      return { drawn: false, version: previousVersion, label: 'Waiting for EFB pixels' };
+      return {
+        drawn: false,
+        version: previousVersion,
+        label: 'Waiting for EFB pixels',
+        source: 'none',
+        efbCaptureMs
+      };
     }
 
-    presenter.draw(module, efbPointer, efbWidth, efbHeight, efbStride);
-    return { drawn: true, version: previousVersion < 0 ? previousVersion : -1, label };
+    const draw = presenter.draw(module, efbPointer, efbWidth, efbHeight, efbStride);
+    return { drawn: true, version: previousVersion < 0 ? previousVersion : -1, label, source: 'efb', draw, efbCaptureMs };
   }
 
   const version = ccallNumber(module, 'dolphin_web_frame_version');
@@ -461,11 +654,11 @@ function drawLatestFrame(
   const pointer = ccallNumber(module, 'dolphin_web_frame_buffer');
 
   if (version === previousVersion || width <= 0 || height <= 0 || stride < width * 4 || pointer <= 0) {
-    return { drawn: false, version, label: version > 0 ? `Frame ${version}` : 'Waiting for XFB frame' };
+    return { drawn: false, version, label: version > 0 ? `Frame ${version}` : 'Waiting for XFB frame', source: 'none' };
   }
 
-  presenter.draw(module, pointer, width, height, stride);
-  return { drawn: true, version, label: `Frame ${version} ${width}x${height}` };
+  const draw = presenter.draw(module, pointer, width, height, stride);
+  return { drawn: true, version, label: `Frame ${version} ${width}x${height}`, source: 'xfb', draw };
 }
 
 function ensureFsDirectory(module: DolphinCoreModule, path: string): void {
@@ -655,9 +848,30 @@ export function App(): ReactElement {
   const framePresenter = useRef<FramePresenter | null>(null);
   const frameVersion = useRef(0);
   const framePresenterModeRef = useRef<FramePresenterMode>('Canvas 2D');
-  const screenStatusRef = useRef('Waiting for browser software renderer');
+  const screenStatusRef = useRef('Waiting for browser renderer');
   const bootStateRef = useRef<BootState>('idle');
   const frameStatsWindow = useRef({ startedAt: performance.now(), frames: 0, lastVersion: 0 });
+  const benchmarkWindow = useRef({
+    draws: 0,
+    drawMs: 0,
+    uploadMs: 0,
+    efbSnapshots: 0,
+    efbCaptureMs: 0,
+    ccallCount: 0,
+    ccallMs: 0,
+    nativeCopyCount: 0,
+    nativeCopyMs: 0,
+    nativeCopyMiB: 0,
+    cpuMs: 0,
+    swRasterMs: 0,
+    swRasterBatches: 0,
+    webglUploadMs: 0,
+    webglUploads: 0,
+    webglPresentMs: 0,
+    webglPresents: 0,
+    xfbCopyMs: 0,
+    xfbCopies: 0
+  });
   const lastPresentationAt = useRef(0);
   const lastEfbSnapshotAt = useRef(0);
   const autoBootStarted = useRef(false);
@@ -669,9 +883,10 @@ export function App(): ReactElement {
   const [isMountingNand, setIsMountingNand] = useState(false);
   const [bootState, setBootState] = useState<BootState>('idle');
   const [bootMessage, setBootMessage] = useState('Waiting for Dolphin WASM core');
-  const [screenStatus, setScreenStatus] = useState('Waiting for browser software renderer');
+  const [screenStatus, setScreenStatus] = useState('Waiting for browser renderer');
   const [frameStats, setFrameStats] = useState<FrameStats>(EMPTY_FRAME_STATS);
   const [corePerfStats, setCorePerfStats] = useState<CorePerfStats>(EMPTY_CORE_PERF_STATS);
+  const [benchmarkStats, setBenchmarkStats] = useState<BenchmarkStats>(EMPTY_BENCHMARK_STATS);
   const [framePresenterMode, setFramePresenterMode] = useState<FramePresenterMode>('Canvas 2D');
   const [wiimotePointer, setWiimotePointer] = useState<WiimotePointerState>({
     x: 0.5,
@@ -681,6 +896,7 @@ export function App(): ReactElement {
   });
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const mmuRequested = useMemo(() => isMmuRequested(), []);
 
   const runtimeStatus = useMemo(
     () => [
@@ -689,6 +905,7 @@ export function App(): ReactElement {
         value: bootState === 'success' ? 'Ready' : bootState === 'blocked' ? 'Failed' : bootState === 'booting' ? 'Booting' : 'Pending'
       },
       { label: 'CPU mode', value: 'Cached interpreter' },
+      { label: 'MMU', value: mmuRequested ? 'On' : 'Off' },
       { label: 'Renderer', value: framePresenterMode },
       { label: 'FPS', value: frameRateLabel(frameStats) },
       { label: 'Core speed', value: coreSpeedLabel(corePerfStats) },
@@ -697,7 +914,23 @@ export function App(): ReactElement {
       { label: 'NAND', value: nandMount ? `${nandMount.fileCount} files` : 'Missing' },
       { label: 'Boot target', value: mountedDisc && isDirectBootFile(mountedDisc.name) ? mountedDisc.name : 'Wii Menu' }
     ],
-    [bootState, corePerfStats, framePresenterMode, frameStats, mountedDisc, nandMount, wiimotePointer]
+    [bootState, corePerfStats, framePresenterMode, frameStats, mountedDisc, mmuRequested, nandMount, wiimotePointer]
+  );
+
+  const benchmarkStatus = useMemo(
+    () => [
+      { label: 'CPU active', value: `${benchmarkStats.cpuMsRate.toFixed(1)} ms/s` },
+      { label: 'SW raster', value: `${benchmarkStats.swRasterMsRate.toFixed(1)} ms/s` },
+      { label: 'SW batches', value: `${benchmarkStats.swRasterBatchesRate.toFixed(0)}/s` },
+      { label: 'WebGL upload', value: millisecondsLabel(benchmarkStats.webglUploadMsPerFrame) },
+      { label: 'WebGL present', value: millisecondsLabel(benchmarkStats.webglPresentMsPerFrame) },
+      { label: 'XFB copy', value: millisecondsLabel(benchmarkStats.xfbCopyMsPerFrame) },
+      { label: 'JS bridge', value: `${benchmarkStats.ccallMsRate.toFixed(2)} ms/s` },
+      { label: 'Bridge calls', value: `${benchmarkStats.ccallRate.toFixed(0)}/s` },
+      { label: 'EFB fallback', value: `${benchmarkStats.efbSnapshots}/s` },
+      { label: 'Copied', value: `${benchmarkStats.nativeCopyMiB.toFixed(2)} MiB/s` }
+    ],
+    [benchmarkStats]
   );
 
   const canBootMountedFile = Boolean(mountedDisc && mountedFile.current && isDirectBootFile(mountedDisc.name));
@@ -709,6 +942,21 @@ export function App(): ReactElement {
 
     screenStatusRef.current = nextStatus;
     setScreenStatus(nextStatus);
+  }
+
+  function recordFrameDraw(result: FrameDrawResult): void {
+    const stats = benchmarkWindow.current;
+
+    if (result.draw) {
+      stats.draws += 1;
+      stats.drawMs += result.draw.totalMs;
+      stats.uploadMs += result.draw.uploadMs;
+    }
+
+    if (typeof result.efbCaptureMs === 'number') {
+      stats.efbSnapshots += 1;
+      stats.efbCaptureMs += result.efbCaptureMs;
+    }
   }
 
   function updateFrameStats(module: DolphinCoreModule, version: number): void {
@@ -742,22 +990,108 @@ export function App(): ReactElement {
       sampleMs
     };
     const nextPerfStats = readCorePerfStats(module);
+    const stats = benchmarkWindow.current;
+    const nativeFrameStats = readNativeFrameStats(module);
+    const ccallCount = dolphinWebCcallCount - stats.ccallCount;
+    const ccallMs = dolphinWebCcallMilliseconds - stats.ccallMs;
+    const nativeCopies = nativeFrameStats.copyCount - stats.nativeCopyCount;
+    const nativeCopyMs = nativeFrameStats.copyMs - stats.nativeCopyMs;
+    const nativeCopyMiB = nativeFrameStats.copyMiB - stats.nativeCopyMiB;
+    const cpuMs = nativeFrameStats.cpuMs - stats.cpuMs;
+    const swRasterMs = nativeFrameStats.swRasterMs - stats.swRasterMs;
+    const swRasterBatches = nativeFrameStats.swRasterBatches - stats.swRasterBatches;
+    const webglUploadMs = nativeFrameStats.webglUploadMs - stats.webglUploadMs;
+    const webglUploads = nativeFrameStats.webglUploads - stats.webglUploads;
+    const webglPresentMs = nativeFrameStats.webglPresentMs - stats.webglPresentMs;
+    const webglPresents = nativeFrameStats.webglPresents - stats.webglPresents;
+    const xfbCopyMs = nativeFrameStats.xfbCopyMs - stats.xfbCopyMs;
+    const xfbCopies = nativeFrameStats.xfbCopies - stats.xfbCopies;
+    const nextBenchmarkStats = {
+      draws: stats.draws,
+      avgDrawMs: stats.draws > 0 ? stats.drawMs / stats.draws : 0,
+      avgUploadMs: stats.draws > 0 ? stats.uploadMs / stats.draws : 0,
+      ccallCount,
+      ccallRate: (ccallCount * 1000) / sampleMs,
+      ccallMs,
+      ccallMsRate: (ccallMs * 1000) / sampleMs,
+      avgCcallMs: ccallCount > 0 ? ccallMs / ccallCount : 0,
+      efbSnapshots: Math.round((stats.efbSnapshots * 1000) / sampleMs),
+      avgEfbCaptureMs: stats.efbSnapshots > 0 ? stats.efbCaptureMs / stats.efbSnapshots : 0,
+      nativeCopies,
+      avgNativeCopyMs: nativeCopies > 0 ? nativeCopyMs / nativeCopies : 0,
+      nativeCopyMiB: (nativeCopyMiB * 1000) / sampleMs,
+      cpuMsRate: (cpuMs * 1000) / sampleMs,
+      swRasterMsRate: (swRasterMs * 1000) / sampleMs,
+      swRasterBatchesRate: (swRasterBatches * 1000) / sampleMs,
+      avgSwRasterMs: swRasterBatches > 0 ? swRasterMs / swRasterBatches : 0,
+      webglUploadMsPerFrame: webglUploads > 0 ? webglUploadMs / webglUploads : 0,
+      webglPresentMsPerFrame: webglPresents > 0 ? webglPresentMs / webglPresents : 0,
+      xfbCopyMsPerFrame: xfbCopies > 0 ? xfbCopyMs / xfbCopies : 0,
+      sampleMs
+    };
 
     window.__dolphinFrameStats = nextStats;
     window.__dolphinPerfStats = nextPerfStats;
+    window.__dolphinBenchmarkStats = nextBenchmarkStats;
     setFrameStats(nextStats);
     setCorePerfStats(nextPerfStats);
+    setBenchmarkStats(nextBenchmarkStats);
     statsWindow.startedAt = now;
     statsWindow.frames = 0;
+    benchmarkWindow.current = {
+      draws: 0,
+      drawMs: 0,
+      uploadMs: 0,
+      efbSnapshots: 0,
+      efbCaptureMs: 0,
+      ccallCount: dolphinWebCcallCount,
+      ccallMs: dolphinWebCcallMilliseconds,
+      nativeCopyCount: nativeFrameStats.copyCount,
+      nativeCopyMs: nativeFrameStats.copyMs,
+      nativeCopyMiB: nativeFrameStats.copyMiB,
+      cpuMs: nativeFrameStats.cpuMs,
+      swRasterMs: nativeFrameStats.swRasterMs,
+      swRasterBatches: nativeFrameStats.swRasterBatches,
+      webglUploadMs: nativeFrameStats.webglUploadMs,
+      webglUploads: nativeFrameStats.webglUploads,
+      webglPresentMs: nativeFrameStats.webglPresentMs,
+      webglPresents: nativeFrameStats.webglPresents,
+      xfbCopyMs: nativeFrameStats.xfbCopyMs,
+      xfbCopies: nativeFrameStats.xfbCopies
+    };
   }
 
-  function resetFrameStats(): void {
+  function resetFrameStats(module?: DolphinCoreModule): void {
+    const nativeFrameStats = module ? readNativeFrameStats(module) : EMPTY_NATIVE_FRAME_STATS;
     frameVersion.current = 0;
     frameStatsWindow.current = { startedAt: performance.now(), frames: 0, lastVersion: 0 };
+    benchmarkWindow.current = {
+      draws: 0,
+      drawMs: 0,
+      uploadMs: 0,
+      efbSnapshots: 0,
+      efbCaptureMs: 0,
+      ccallCount: dolphinWebCcallCount,
+      ccallMs: dolphinWebCcallMilliseconds,
+      nativeCopyCount: nativeFrameStats.copyCount,
+      nativeCopyMs: nativeFrameStats.copyMs,
+      nativeCopyMiB: nativeFrameStats.copyMiB,
+      cpuMs: nativeFrameStats.cpuMs,
+      swRasterMs: nativeFrameStats.swRasterMs,
+      swRasterBatches: nativeFrameStats.swRasterBatches,
+      webglUploadMs: nativeFrameStats.webglUploadMs,
+      webglUploads: nativeFrameStats.webglUploads,
+      webglPresentMs: nativeFrameStats.webglPresentMs,
+      webglPresents: nativeFrameStats.webglPresents,
+      xfbCopyMs: nativeFrameStats.xfbCopyMs,
+      xfbCopies: nativeFrameStats.xfbCopies
+    };
     window.__dolphinFrameStats = EMPTY_FRAME_STATS;
     window.__dolphinPerfStats = EMPTY_CORE_PERF_STATS;
+    window.__dolphinBenchmarkStats = EMPTY_BENCHMARK_STATS;
     setFrameStats(EMPTY_FRAME_STATS);
     setCorePerfStats(EMPTY_CORE_PERF_STATS);
+    setBenchmarkStats(EMPTY_BENCHMARK_STATS);
   }
 
   useEffect(() => {
@@ -773,6 +1107,7 @@ export function App(): ReactElement {
       delete window.__dolphinCoreModule;
       delete window.__dolphinFrameStats;
       delete window.__dolphinPerfStats;
+      delete window.__dolphinBenchmarkStats;
       delete window.__dolphinFramePresenterMode;
     };
   }, []);
@@ -780,6 +1115,28 @@ export function App(): ReactElement {
   useEffect(() => {
     bootStateRef.current = bootState;
   }, [bootState]);
+
+  useEffect(() => {
+    const onCoreStderr = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail ?? '';
+      if (!message.trim()) {
+        return;
+      }
+
+      if (
+        message.includes('Invalid read from') ||
+        message.includes('Invalid write to') ||
+        message.includes('Enable MMU')
+      ) {
+        setError(
+          'Dolphin reported an invalid emulated memory access. Reload with ?mmu=1 or &mmu=1 to enable MMU exception handling for this title.'
+        );
+      }
+    };
+
+    window.addEventListener('dolphin-core-stderr', onCoreStderr);
+    return () => window.removeEventListener('dolphin-core-stderr', onCoreStderr);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -809,7 +1166,28 @@ export function App(): ReactElement {
       const canvas = screenCanvas.current;
       const now = performance.now();
 
-      if (module && canvas && now - lastPresentationAt.current >= PRESENTATION_INTERVAL_MS) {
+      if (
+        module &&
+        isNativeWebGL2CoreRenderer() &&
+        now - lastPresentationAt.current >= PRESENTATION_INTERVAL_MS
+      ) {
+        lastPresentationAt.current = now;
+        framePresenter.current = null;
+        const nativeVersion = ccallNumber(module, 'dolphin_web_frame_version');
+        if (framePresenterModeRef.current !== 'Native WebGL2 backend') {
+          window.__dolphinFramePresenterMode = 'Native WebGL2 backend';
+          framePresenterModeRef.current = 'Native WebGL2 backend';
+          setFramePresenterMode('Native WebGL2 backend');
+          updateScreenStatus('Native WebGL2 backend owns canvas');
+        }
+        updateFrameStats(module, nativeVersion);
+        if (nativeVersion > 0 && nativeVersion !== frameVersion.current) {
+          frameVersion.current = nativeVersion;
+          updateScreenStatus(`Native frame ${nativeVersion}`);
+        } else {
+          setCorePerfStats(readCorePerfStats(module));
+        }
+      } else if (module && canvas && now - lastPresentationAt.current >= PRESENTATION_INTERVAL_MS) {
         lastPresentationAt.current = now;
         try {
           const presenter = framePresenter.current ?? createFramePresenter(canvas);
@@ -829,6 +1207,7 @@ export function App(): ReactElement {
           }
 
           const result = drawLatestFrame(module, presenter, frameVersion.current, allowEfbSnapshot);
+          recordFrameDraw(result);
           updateFrameStats(module, result.version);
           if (result.version !== frameVersion.current || result.label !== screenStatusRef.current) {
             frameVersion.current = result.version;
@@ -968,7 +1347,7 @@ export function App(): ReactElement {
     dolphinCore.current = module;
     window.__dolphinCoreModule = module;
 
-    const initResult = ccallNumber(module, 'dolphin_web_initialize');
+    const initResult = initializeCoreRenderer(module);
     if (initResult <= 0) {
       throw new Error(ccallString(module, 'dolphin_web_last_status') || `Dolphin init failed with ${initResult}.`);
     }
@@ -993,7 +1372,7 @@ export function App(): ReactElement {
     const bootPath = `${BOOT_FILE_DIR}/${sanitizeFileName(name)}`;
     module.FS.writeFile(bootPath, bytes);
 
-    resetFrameStats();
+    resetFrameStats(module);
     setBootMessage(`Calling BootCore for ${name}`);
     const bootResult = Number(module.ccall('dolphin_web_boot_path', 'number', ['string'], [bootPath]));
     const status = ccallString(module, 'dolphin_web_last_status');
@@ -1100,7 +1479,7 @@ export function App(): ReactElement {
         const module = await ensureDolphinCore();
         const version = ccallNumber(module, 'dolphin_web_core_version');
 
-        resetFrameStats();
+        resetFrameStats(module);
         setBootMessage('Calling BootCore for Wii Menu');
         const bootResult = ccallNumber(module, 'boot_wii_menu');
         const status = ccallString(module, 'dolphin_web_last_status');
@@ -1258,13 +1637,35 @@ export function App(): ReactElement {
           </div>
         </div>
 
+        <div className="panel wide-panel">
+          <div className="panel-heading">
+            <h2>Benchmark</h2>
+            <StatusPill available={benchmarkStats.sampleMs > 0} />
+          </div>
+          <div className="runtime-grid">
+            {benchmarkStatus.map((item) => (
+              <div key={item.label}>
+                <span className="field-label">{item.label}</span>
+                <strong>{item.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="panel wide-panel screen-panel">
           <div className="panel-heading">
             <h2>Screen</h2>
-            <StatusPill available={screenStatus.startsWith('Frame') || screenStatus.startsWith('EFB')} />
+            <StatusPill
+              available={
+                screenStatus.startsWith('Frame') ||
+                screenStatus.startsWith('EFB') ||
+                framePresenterMode === 'Native WebGL2 backend'
+              }
+            />
           </div>
           <div className="screen-stage">
             <canvas
+              id="dolphin-webgl-canvas"
               ref={screenCanvas}
               width="640"
               height="480"

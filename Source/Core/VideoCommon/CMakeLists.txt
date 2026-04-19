@@ -134,6 +134,8 @@ add_library(videocommon
   PerformanceMetrics.h
   PerformanceTracker.cpp
   PerformanceTracker.h
+  WebPerfMetrics.cpp
+  WebPerfMetrics.h
   PipelineUtils.cpp
   PipelineUtils.h
   PixelEngine.cpp

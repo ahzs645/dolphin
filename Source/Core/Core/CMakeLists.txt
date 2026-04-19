@@ -720,6 +720,10 @@ PRIVATE
   ZLIB::ZLIB
 )
 
+if(EMSCRIPTEN)
+  target_link_libraries(core PUBLIC videowebgl)
+endif()
+
 if(NOT EMSCRIPTEN)
   target_link_libraries(core PUBLIC sfml-network)
 endif()

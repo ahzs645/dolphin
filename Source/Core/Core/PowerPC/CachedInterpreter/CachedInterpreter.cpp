@@ -3,6 +3,9 @@
 
 #include "Core/PowerPC/CachedInterpreter/CachedInterpreter.h"
 
+#ifdef __EMSCRIPTEN__
+#include <chrono>
+#endif
 #include <span>
 #include <sstream>
 #include <utility>
@@ -24,6 +27,9 @@
 #include "Core/PowerPC/PPCAnalyst.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
+#ifdef __EMSCRIPTEN__
+#include "VideoCommon/WebPerfMetrics.h"
+#endif
 
 CachedInterpreter::CachedInterpreter(Core::System& system) : JitBase(system), m_block_cache(*this)
 {
@@ -92,8 +98,15 @@ void CachedInterpreter::Run()
   auto& core_timing = m_system.GetCoreTiming();
 
   const CPU::State* state_ptr = m_system.GetCPU().GetStatePtr();
+#ifdef __EMSCRIPTEN__
+  double accumulated_cpu_milliseconds = 0.0;
+  u32 accumulated_cpu_slices = 0;
+#endif
   while (*state_ptr == CPU::State::Running)
   {
+#ifdef __EMSCRIPTEN__
+    const auto slice_start = std::chrono::steady_clock::now();
+#endif
     // Start new timing slice
     // NOTE: Exceptions may change PC
     core_timing.Advance();
@@ -102,7 +115,23 @@ void CachedInterpreter::Run()
     {
       ExecuteOneBlock();
     } while (m_ppc_state.downcount > 0 && *state_ptr == CPU::State::Running);
+#ifdef __EMSCRIPTEN__
+    const auto slice_end = std::chrono::steady_clock::now();
+    accumulated_cpu_milliseconds +=
+        std::chrono::duration<double, std::milli>(slice_end - slice_start).count();
+    ++accumulated_cpu_slices;
+    if (accumulated_cpu_slices >= 64 || accumulated_cpu_milliseconds >= 10.0)
+    {
+      WebPerfMetrics::NoteCachedInterpreterCPUTime(accumulated_cpu_milliseconds);
+      accumulated_cpu_milliseconds = 0.0;
+      accumulated_cpu_slices = 0;
+    }
+#endif
   }
+#ifdef __EMSCRIPTEN__
+  if (accumulated_cpu_slices > 0)
+    WebPerfMetrics::NoteCachedInterpreterCPUTime(accumulated_cpu_milliseconds);
+#endif
 }
 
 void CachedInterpreter::SingleStep()

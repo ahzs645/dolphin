@@ -5,6 +5,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 #include "Common/WindowSystemInfo.h"
@@ -18,6 +19,7 @@
 #endif
 
 #include "VideoBackends/Software/SWTexture.h"
+#include "VideoCommon/WebPerfMetrics.h"
 
 #ifdef __EMSCRIPTEN__
 namespace
@@ -29,6 +31,9 @@ u32 s_latest_width = 0;
 u32 s_latest_height = 0;
 u32 s_latest_stride = 0;
 u32 s_latest_version = 0;
+u32 s_frame_copy_count = 0;
+double s_frame_copy_milliseconds = 0.0;
+double s_frame_copy_megabytes = 0.0;
 }
 
 extern "C"
@@ -61,6 +66,35 @@ int dolphin_web_has_frame()
 const unsigned char* dolphin_web_frame_buffer()
 {
   return s_latest_frame;
+}
+
+int dolphin_web_frame_copy_count()
+{
+  return static_cast<int>(s_frame_copy_count);
+}
+
+double dolphin_web_frame_copy_milliseconds()
+{
+  return s_frame_copy_milliseconds;
+}
+
+double dolphin_web_frame_copy_megabytes()
+{
+  return s_frame_copy_megabytes;
+}
+
+void dolphin_web_note_frame_presented(int width, int height, double upload_milliseconds,
+                                      double upload_megabytes)
+{
+  s_latest_width = static_cast<u32>(std::max(width, 0));
+  s_latest_height = static_cast<u32>(std::max(height, 0));
+  s_latest_stride = s_latest_width * 4;
+  ++s_latest_version;
+  ++s_frame_copy_count;
+  s_frame_copy_milliseconds += upload_milliseconds;
+  s_frame_copy_megabytes += upload_megabytes;
+  WebPerfMetrics::NoteWebGLUpload(upload_milliseconds, upload_megabytes);
+  WebPerfMetrics::NoteFramePresented(s_latest_width, s_latest_height);
 }
 }
 #endif
@@ -180,18 +214,29 @@ void SWOGLWindow::ShowImage(const AbstractTexture* image,
   const u32 target_stride = width * 4;
   const u8* source = sw_image->GetData(0, 0);
 
+  const auto copy_start = std::chrono::steady_clock::now();
   m_framebuffer.resize(static_cast<size_t>(target_stride) * height);
   for (u32 y = 0; y < height; ++y)
   {
     std::memcpy(&m_framebuffer[static_cast<size_t>(y) * target_stride],
                 source + static_cast<size_t>(top + y) * source_stride + left * 4, target_stride);
   }
+  const auto copy_end = std::chrono::steady_clock::now();
 
   s_latest_frame = m_framebuffer.data();
   s_latest_width = width;
   s_latest_height = height;
   s_latest_stride = target_stride;
   ++s_latest_version;
+  ++s_frame_copy_count;
+  const double copy_milliseconds =
+      std::chrono::duration<double, std::milli>(copy_end - copy_start).count();
+  const double copy_megabytes =
+      static_cast<double>(static_cast<size_t>(target_stride) * height) / (1024.0 * 1024.0);
+  s_frame_copy_milliseconds += copy_milliseconds;
+  s_frame_copy_megabytes += copy_megabytes;
+  WebPerfMetrics::NoteXFBCopy(copy_milliseconds, copy_megabytes);
+  WebPerfMetrics::NoteFramePresented(width, height);
   m_backbuffer_width = width;
   m_backbuffer_height = height;
 #else
