@@ -25,6 +25,8 @@
 
 #include "InputCommon/ControllerInterface/Touch/InputOverrider.h"
 
+#include "VideoBackends/WebGL/VideoBackend.h"
+
 #include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/VideoBackendBase.h"
 #include "VideoCommon/WebPerfMetrics.h"
@@ -168,8 +170,14 @@ EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize_with_options(const char* rendere
     return 1;
   }
 
-  const std::string renderer =
+  std::string renderer =
       renderer_name && renderer_name[0] != '\0' ? renderer_name : "Software Renderer";
+  const bool experimental_webgl_gx =
+      renderer == "WebGL2 GX" || renderer == "WebGL2 Native GX" || renderer == "webgl-gx";
+  if (experimental_webgl_gx)
+    renderer = "WebGL2";
+
+  WebGL::SetExperimentalGXBackendEnabled(experimental_webgl_gx);
   const WindowSystemInfo wsi = MakeWebWindowSystemInfo();
 
   UICommon::SetUserDirectory("/dolphin-user");
@@ -181,6 +189,7 @@ EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize_with_options(const char* rendere
   emscripten_console_warn(
       ("Dolphin web requested renderer: " + renderer + ", active backend: " +
        (g_video_backend ? g_video_backend->GetConfigName() : std::string("<none>")) +
+       ", GX path: " + (experimental_webgl_gx ? "native experimental" : "software frontend") +
        ", MMU: " + (enable_mmu != 0 ? "on" : "off"))
           .c_str());
 
@@ -189,6 +198,7 @@ EMSCRIPTEN_KEEPALIVE int dolphin_web_initialize_with_options(const char* rendere
 
   s_ui_initialized = true;
   SetStatus("Dolphin UICommon initialized with the browser " + renderer +
+            (experimental_webgl_gx ? " native-GX experimental" : "") +
             " renderer, " + (enable_mmu != 0 ? "MMU enabled" : "MMU disabled") +
             ", and mouse-backed Wii Remote input.");
   return 1;

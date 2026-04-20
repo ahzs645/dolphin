@@ -13,12 +13,14 @@
 
 #include "Common/Logging/Log.h"
 
+#include "VideoCommon/BPMemory.h"
 #include "VideoBackends/Software/EfbCopy.h"
 #include "VideoBackends/Software/Rasterizer.h"
 #include "VideoBackends/Software/SWTexture.h"
 #include "VideoBackends/WebGL/WebGLPipeline.h"
 #include "VideoBackends/WebGL/WebGLShader.h"
 #include "VideoBackends/WebGL/WebGLTexture.h"
+#include "VideoBackends/WebGL/WebGLVertexFormat.h"
 
 #include "VideoCommon/NativeVertexFormat.h"
 #include "VideoCommon/RenderState.h"
@@ -29,6 +31,7 @@ namespace WebGL
 {
 extern "C" void dolphin_web_note_frame_presented(int width, int height, double copy_milliseconds,
                                                  double copy_megabytes);
+extern "C" void dolphin_web_note_native_frame_presented(int width, int height);
 
 namespace
 {
@@ -196,7 +199,23 @@ Gfx::Gfx(std::unique_ptr<Context> context, bool software_rasterizer_frontend)
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_PACK_ALIGNMENT, 4);
   glEnable(GL_SCISSOR_TEST);
+  glGenVertexArrays(1, &m_attributeless_vao);
+  m_current_rasterization_state = RenderState::GetInvalidRasterizationState();
+  m_current_depth_state = RenderState::GetInvalidDepthState();
+  m_current_blend_state = RenderState::GetInvalidBlendingState();
   UpdateActiveConfig();
+
+  if (!m_software_rasterizer_frontend)
+  {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, m_context->GetBackbufferWidth(), m_context->GetBackbufferHeight());
+    glScissor(0, 0, m_context->GetBackbufferWidth(), m_context->GetBackbufferHeight());
+    glClearColor(0.02f, 0.08f, 0.07f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    PresentBackbuffer();
+    emscripten_console_warn(
+        "WebGL2 native GX diagnostic frame presented; waiting for game GPU frames.");
+  }
 }
 
 Gfx::~Gfx()
@@ -209,6 +228,8 @@ Gfx::~Gfx()
     glDeleteTextures(1, &m_image_upload_texture);
   if (m_image_vao != 0)
     glDeleteVertexArrays(1, &m_image_vao);
+  if (m_attributeless_vao != 0)
+    glDeleteVertexArrays(1, &m_attributeless_vao);
 }
 
 std::unique_ptr<AbstractTexture> Gfx::CreateTexture(const TextureConfig& config,
@@ -261,6 +282,9 @@ std::unique_ptr<AbstractShader> Gfx::CreateShaderFromBinary(ShaderStage stage, c
 std::unique_ptr<NativeVertexFormat>
 Gfx::CreateNativeVertexFormat(const PortableVertexDeclaration& vtx_decl)
 {
+  if (!m_software_rasterizer_frontend)
+    return std::make_unique<VertexFormat>(vtx_decl);
+
   return std::make_unique<NativeVertexFormat>(vtx_decl);
 }
 
@@ -271,14 +295,100 @@ std::unique_ptr<AbstractPipeline> Gfx::CreatePipeline(const AbstractPipelineConf
   return Pipeline::Create(config);
 }
 
+void Gfx::ApplyRasterizationState(RasterizationState state)
+{
+  if (m_current_rasterization_state == state)
+    return;
+
+  if (state.cull_mode != CullMode::None)
+  {
+    glEnable(GL_CULL_FACE);
+    glFrontFace(state.cull_mode == CullMode::Front ? GL_CCW : GL_CW);
+  }
+  else
+  {
+    glDisable(GL_CULL_FACE);
+  }
+
+  m_current_rasterization_state = state;
+}
+
+void Gfx::ApplyDepthState(DepthState state)
+{
+  if (m_current_depth_state == state)
+    return;
+
+  static constexpr std::array<GLenum, 8> compare_functions = {
+      GL_NEVER,   GL_LESS,     GL_EQUAL,  GL_LEQUAL,
+      GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS};
+
+  if (state.test_enable)
+  {
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(state.update_enable ? GL_TRUE : GL_FALSE);
+    glDepthFunc(compare_functions[u32(state.func.Value())]);
+  }
+  else
+  {
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+  }
+
+  m_current_depth_state = state;
+}
+
+void Gfx::ApplyBlendingState(BlendingState state)
+{
+  if (m_current_blend_state == state)
+    return;
+
+  static constexpr std::array<GLenum, 8> src_factors = {
+      GL_ZERO,      GL_ONE,           GL_DST_COLOR, GL_ONE_MINUS_DST_COLOR,
+      GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
+  static constexpr std::array<GLenum, 8> dst_factors = {
+      GL_ZERO,      GL_ONE,           GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR,
+      GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
+
+  if (state.blend_enable)
+    glEnable(GL_BLEND);
+  else
+    glDisable(GL_BLEND);
+
+  glBlendEquationSeparate(state.subtract ? GL_FUNC_REVERSE_SUBTRACT : GL_FUNC_ADD,
+                          state.subtract_alpha ? GL_FUNC_REVERSE_SUBTRACT : GL_FUNC_ADD);
+  glBlendFuncSeparate(src_factors[u32(state.src_factor.Value())],
+                      dst_factors[u32(state.dst_factor.Value())],
+                      src_factors[u32(state.src_factor_alpha.Value())],
+                      dst_factors[u32(state.dst_factor_alpha.Value())]);
+  glColorMask(state.color_update ? GL_TRUE : GL_FALSE, state.color_update ? GL_TRUE : GL_FALSE,
+              state.color_update ? GL_TRUE : GL_FALSE, state.alpha_update ? GL_TRUE : GL_FALSE);
+
+  m_current_blend_state = state;
+}
+
 void Gfx::SetPipeline(const AbstractPipeline* pipeline)
 {
   if (m_software_rasterizer_frontend)
     return;
 
+  if (m_current_pipeline == pipeline)
+    return;
+
   m_current_pipeline = pipeline;
   const auto* webgl_pipeline = static_cast<const Pipeline*>(pipeline);
-  glUseProgram(webgl_pipeline && webgl_pipeline->IsValid() ? webgl_pipeline->GetProgram() : 0);
+  if (!webgl_pipeline || !webgl_pipeline->IsValid())
+  {
+    glBindVertexArray(m_attributeless_vao);
+    glUseProgram(0);
+    return;
+  }
+
+  ApplyRasterizationState(webgl_pipeline->m_config.rasterization_state);
+  ApplyDepthState(webgl_pipeline->m_config.depth_state);
+  ApplyBlendingState(webgl_pipeline->m_config.blending_state);
+  glBindVertexArray(webgl_pipeline->GetVertexFormat() ? webgl_pipeline->GetVertexFormat()->GetVAO() :
+                                                        m_attributeless_vao);
+  glUseProgram(webgl_pipeline->GetProgram());
 }
 
 void Gfx::SetFramebuffer(AbstractFramebuffer* framebuffer)
@@ -312,6 +422,7 @@ void Gfx::SetAndClearFramebuffer(AbstractFramebuffer* framebuffer, const ClearCo
 
   SetFramebuffer(framebuffer);
 
+  glDisable(GL_SCISSOR_TEST);
   GLbitfield clear_mask = 0;
   if (framebuffer->HasColorBuffer())
   {
@@ -327,6 +438,17 @@ void Gfx::SetAndClearFramebuffer(AbstractFramebuffer* framebuffer, const ClearCo
   }
   if (clear_mask != 0)
     glClear(clear_mask);
+  glEnable(GL_SCISSOR_TEST);
+
+  if (framebuffer->HasColorBuffer())
+  {
+    glColorMask(m_current_blend_state.color_update ? GL_TRUE : GL_FALSE,
+                m_current_blend_state.color_update ? GL_TRUE : GL_FALSE,
+                m_current_blend_state.color_update ? GL_TRUE : GL_FALSE,
+                m_current_blend_state.alpha_update ? GL_TRUE : GL_FALSE);
+  }
+  if (framebuffer->HasDepthBuffer())
+    glDepthMask(m_current_depth_state.update_enable ? GL_TRUE : GL_FALSE);
 }
 
 void Gfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool colorEnable,
@@ -357,6 +479,16 @@ void Gfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool colorEnabl
   }
   if (clear_mask != 0)
     glClear(clear_mask);
+
+  if (colorEnable || alphaEnable)
+  {
+    glColorMask(m_current_blend_state.color_update ? GL_TRUE : GL_FALSE,
+                m_current_blend_state.color_update ? GL_TRUE : GL_FALSE,
+                m_current_blend_state.color_update ? GL_TRUE : GL_FALSE,
+                m_current_blend_state.alpha_update ? GL_TRUE : GL_FALSE);
+  }
+  if (zEnable)
+    glDepthMask(m_current_depth_state.update_enable ? GL_TRUE : GL_FALSE);
 }
 
 void Gfx::SetScissorRect(const MathUtil::Rectangle<int>& rc)
@@ -379,14 +511,17 @@ void Gfx::SetTexture(u32 index, const AbstractTexture* texture)
     return;
 
   const auto* webgl_texture = static_cast<const Texture*>(texture);
-  if (m_bound_textures[index] == webgl_texture)
-    return;
-
   glActiveTexture(GL_TEXTURE0 + index);
   if (webgl_texture)
+  {
     glBindTexture(webgl_texture->GetGLTarget(), webgl_texture->GetGLTexture());
+  }
   else
+  {
+    glBindTexture(GL_TEXTURE_2D, 0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+  }
   m_bound_textures[index] = webgl_texture;
 }
 
@@ -439,6 +574,9 @@ void Gfx::Draw(u32 base_vertex, u32 num_vertices)
     return;
 
   glDrawArrays(pipeline->GetPrimitive(), base_vertex, num_vertices);
+  WebPerfMetrics::NoteNativeDraw(num_vertices);
+  if (glGetError() != GL_NO_ERROR)
+    WebPerfMetrics::NoteNativeGLError();
 }
 
 void Gfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
@@ -452,6 +590,9 @@ void Gfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
 
   glDrawElements(pipeline->GetPrimitive(), num_indices, GL_UNSIGNED_SHORT,
                  static_cast<const u16*>(nullptr) + base_index);
+  WebPerfMetrics::NoteNativeDraw(num_indices);
+  if (glGetError() != GL_NO_ERROR)
+    WebPerfMetrics::NoteNativeGLError();
 }
 
 bool Gfx::BindBackbuffer(const ClearColor& clear_color)
@@ -473,6 +614,12 @@ void Gfx::PresentBackbuffer()
   const auto present_end = std::chrono::steady_clock::now();
   WebPerfMetrics::NoteWebGLPresent(
       std::chrono::duration<double, std::milli>(present_end - present_start).count());
+
+  if (!m_software_rasterizer_frontend)
+  {
+    dolphin_web_note_native_frame_presented(static_cast<int>(m_context->GetBackbufferWidth()),
+                                            static_cast<int>(m_context->GetBackbufferHeight()));
+  }
 }
 
 void Gfx::ShowImage(const AbstractTexture* source_texture, const MathUtil::Rectangle<int>& source_rc)
@@ -561,6 +708,13 @@ void Gfx::ShowImage(const AbstractTexture* source_texture, const MathUtil::Recta
   const auto* texture = static_cast<const Texture*>(source_texture);
   if (!texture || !EnsureImageBlitResources(texture->GetGLTarget()))
     return;
+
+  static bool s_logged_native_xfb = false;
+  if (!s_logged_native_xfb)
+  {
+    emscripten_console_warn("WebGL2 native GX path presenting GPU texture through WebGL2.");
+    s_logged_native_xfb = true;
+  }
 
   UpdateBackbuffer();
 

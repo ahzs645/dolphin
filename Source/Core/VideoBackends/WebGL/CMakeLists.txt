@@ -9,6 +9,8 @@ add_library(videowebgl
   WebGLShader.h
   WebGLTexture.cpp
   WebGLTexture.h
+  WebGLVertexFormat.cpp
+  WebGLVertexFormat.h
   WebGLVertexManager.cpp
   WebGLVertexManager.h
   VideoBackend.cpp

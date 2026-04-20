@@ -24,7 +24,7 @@ public:
   ~Gfx() override;
 
   bool IsHeadless() const override { return false; }
-  bool SupportsUtilityDrawing() const override { return false; }
+  bool SupportsUtilityDrawing() const override { return !m_software_rasterizer_frontend; }
 
   std::unique_ptr<AbstractTexture> CreateTexture(const TextureConfig& config,
                                                  std::string_view name) override;
@@ -72,6 +72,9 @@ public:
   SurfaceInfo GetSurfaceInfo() const override;
 
 private:
+  void ApplyRasterizationState(RasterizationState state);
+  void ApplyDepthState(DepthState state);
+  void ApplyBlendingState(BlendingState state);
   void UpdateBackbuffer();
   bool EnsureImageBlitResources(GLenum texture_target);
 
@@ -79,11 +82,15 @@ private:
   bool m_software_rasterizer_frontend = false;
   std::unique_ptr<Framebuffer> m_system_framebuffer;
   std::array<const Texture*, VideoCommon::MAX_PIXEL_SHADER_SAMPLERS> m_bound_textures{};
+  GLuint m_attributeless_vao = 0;
   GLuint m_image_vao = 0;
   GLuint m_image_upload_texture = 0;
   u32 m_image_upload_width = 0;
   u32 m_image_upload_height = 0;
   GLuint m_image_2d_program = 0;
   GLuint m_image_2d_array_program = 0;
+  RasterizationState m_current_rasterization_state = {};
+  DepthState m_current_depth_state = {};
+  BlendingState m_current_blend_state = {};
 };
 }  // namespace WebGL

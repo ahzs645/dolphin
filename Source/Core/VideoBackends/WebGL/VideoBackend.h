@@ -10,6 +10,9 @@
 
 namespace WebGL
 {
+void SetExperimentalGXBackendEnabled(bool enabled);
+bool IsExperimentalGXBackendEnabled();
+
 class VideoBackend final : public VideoBackendBase
 {
 public:

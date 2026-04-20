@@ -15,6 +15,11 @@ void NoteWebGLUpload(double milliseconds, double megabytes);
 void NoteWebGLPresent(double milliseconds);
 void NoteXFBCopy(double milliseconds, double megabytes);
 void NoteFramePresented(u32 width, u32 height);
+void NoteNativeDraw(u32 vertices_or_indices);
+void NoteNativeFramebufferCopy();
+void NoteNativeReadback();
+void NoteNativeTextureLoad();
+void NoteNativeGLError();
 
 double GetCachedInterpreterCPUMilliseconds();
 u64 GetCachedInterpreterCPUSamples();
@@ -32,5 +37,10 @@ u64 GetXFBCopies();
 u64 GetPresentedFrames();
 u32 GetLastPresentedWidth();
 u32 GetLastPresentedHeight();
+u64 GetNativeDraws();
+u64 GetNativeVerticesOrIndices();
+u64 GetNativeFramebufferCopies();
+u64 GetNativeReadbacks();
+u64 GetNativeTextureLoads();
+u64 GetNativeGLErrors();
 }  // namespace WebPerfMetrics
-

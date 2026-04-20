@@ -66,6 +66,12 @@ Current scaffold:
   It owns a VAO, VBO, and IBO and stages committed vertex/index ranges with
   `glBufferSubData`; it is not selected by default until shader translation and
   native vertex-format binding are ready.
+- `?renderer=webgl-gx` selects the guarded native GX experiment. That path uses
+  WebGL2 textures/framebuffers, the WebGL2 vertex manager, native vertex-format
+  VAOs, basic pipeline state binding, UBO uploads, and the default
+  `TextureCacheBase`/hardware EFB interface. It is expected to be incomplete and
+  may render black or hit shader gaps; the default `WebGL2` path remains the
+  stable benchmark mode.
 - `?mmu=1` enables Dolphin MMU mode before boot for titles that rely on DSI
   exception behavior. This is a compatibility mode and is expected to be slower
   than the default cached-interpreter path with MMU off.

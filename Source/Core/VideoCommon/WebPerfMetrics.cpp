@@ -25,6 +25,12 @@ std::atomic<u64> s_xfb_copies{};
 std::atomic<u64> s_presented_frames{};
 std::atomic<u32> s_last_presented_width{};
 std::atomic<u32> s_last_presented_height{};
+std::atomic<u64> s_native_draws{};
+std::atomic<u64> s_native_vertices_or_indices{};
+std::atomic<u64> s_native_framebuffer_copies{};
+std::atomic<u64> s_native_readbacks{};
+std::atomic<u64> s_native_texture_loads{};
+std::atomic<u64> s_native_gl_errors{};
 
 void AddAtomicDouble(std::atomic<double>& target, double value)
 {
@@ -54,6 +60,12 @@ void Reset()
   s_presented_frames = 0;
   s_last_presented_width = 0;
   s_last_presented_height = 0;
+  s_native_draws = 0;
+  s_native_vertices_or_indices = 0;
+  s_native_framebuffer_copies = 0;
+  s_native_readbacks = 0;
+  s_native_texture_loads = 0;
+  s_native_gl_errors = 0;
 }
 
 void NoteCachedInterpreterCPUTime(double milliseconds)
@@ -94,6 +106,32 @@ void NoteFramePresented(u32 width, u32 height)
   s_last_presented_width.store(width, std::memory_order_relaxed);
   s_last_presented_height.store(height, std::memory_order_relaxed);
   s_presented_frames.fetch_add(1, std::memory_order_relaxed);
+}
+
+void NoteNativeDraw(u32 vertices_or_indices)
+{
+  s_native_draws.fetch_add(1, std::memory_order_relaxed);
+  s_native_vertices_or_indices.fetch_add(vertices_or_indices, std::memory_order_relaxed);
+}
+
+void NoteNativeFramebufferCopy()
+{
+  s_native_framebuffer_copies.fetch_add(1, std::memory_order_relaxed);
+}
+
+void NoteNativeReadback()
+{
+  s_native_readbacks.fetch_add(1, std::memory_order_relaxed);
+}
+
+void NoteNativeTextureLoad()
+{
+  s_native_texture_loads.fetch_add(1, std::memory_order_relaxed);
+}
+
+void NoteNativeGLError()
+{
+  s_native_gl_errors.fetch_add(1, std::memory_order_relaxed);
 }
 
 double GetCachedInterpreterCPUMilliseconds()
@@ -174,6 +212,36 @@ u32 GetLastPresentedWidth()
 u32 GetLastPresentedHeight()
 {
   return s_last_presented_height.load(std::memory_order_relaxed);
+}
+
+u64 GetNativeDraws()
+{
+  return s_native_draws.load(std::memory_order_relaxed);
+}
+
+u64 GetNativeVerticesOrIndices()
+{
+  return s_native_vertices_or_indices.load(std::memory_order_relaxed);
+}
+
+u64 GetNativeFramebufferCopies()
+{
+  return s_native_framebuffer_copies.load(std::memory_order_relaxed);
+}
+
+u64 GetNativeReadbacks()
+{
+  return s_native_readbacks.load(std::memory_order_relaxed);
+}
+
+u64 GetNativeTextureLoads()
+{
+  return s_native_texture_loads.load(std::memory_order_relaxed);
+}
+
+u64 GetNativeGLErrors()
+{
+  return s_native_gl_errors.load(std::memory_order_relaxed);
 }
 }  // namespace WebPerfMetrics
 
@@ -258,5 +326,34 @@ int dolphin_web_perf_presented_height()
 {
   return static_cast<int>(WebPerfMetrics::GetLastPresentedHeight());
 }
+
+int dolphin_web_perf_native_draws()
+{
+  return static_cast<int>(WebPerfMetrics::GetNativeDraws());
 }
 
+int dolphin_web_perf_native_vertices_or_indices()
+{
+  return static_cast<int>(WebPerfMetrics::GetNativeVerticesOrIndices());
+}
+
+int dolphin_web_perf_native_framebuffer_copies()
+{
+  return static_cast<int>(WebPerfMetrics::GetNativeFramebufferCopies());
+}
+
+int dolphin_web_perf_native_readbacks()
+{
+  return static_cast<int>(WebPerfMetrics::GetNativeReadbacks());
+}
+
+int dolphin_web_perf_native_texture_loads()
+{
+  return static_cast<int>(WebPerfMetrics::GetNativeTextureLoads());
+}
+
+int dolphin_web_perf_native_gl_errors()
+{
+  return static_cast<int>(WebPerfMetrics::GetNativeGLErrors());
+}
+}

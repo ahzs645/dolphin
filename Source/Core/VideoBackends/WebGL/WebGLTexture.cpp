@@ -8,6 +8,8 @@
 
 #include "Common/Logging/Log.h"
 
+#include "VideoCommon/WebPerfMetrics.h"
+
 namespace WebGL
 {
 namespace
@@ -55,6 +57,19 @@ void AttachTexture(GLenum framebuffer_target, GLenum attachment, const Texture* 
 u32 MipSize(u32 value, u32 level)
 {
   return std::max(value >> level, 1u);
+}
+
+void SwizzleReadbackRGBA8ToBGRA8(u8* base, u32 width, u32 height, size_t stride)
+{
+  for (u32 y = 0; y < height; ++y)
+  {
+    u8* row = base + y * stride;
+    for (u32 x = 0; x < width; ++x)
+    {
+      u8* pixel = row + x * 4;
+      std::swap(pixel[0], pixel[2]);
+    }
+  }
 }
 }  // namespace
 
@@ -225,6 +240,9 @@ void Texture::CopyRectangleFromTexture(const AbstractTexture* src,
   glDisable(GL_SCISSOR_TEST);
   glBlitFramebuffer(src_rect.left, src_rect.top, src_rect.right, src_rect.bottom, dst_rect.left,
                     dst_rect.top, dst_rect.right, dst_rect.bottom, mask, GL_NEAREST);
+  WebPerfMetrics::NoteNativeFramebufferCopy();
+  if (glGetError() != GL_NO_ERROR)
+    WebPerfMetrics::NoteNativeGLError();
   glEnable(GL_SCISSOR_TEST);
 
   glBindFramebuffer(GL_READ_FRAMEBUFFER, previous_read_fbo);
@@ -261,6 +279,9 @@ void Texture::Load(u32 level, u32 width, u32 height, u32 row_length, const u8* b
   {
     glTexSubImage3D(m_target, level, 0, 0, layer, width, height, 1, format, type, buffer);
   }
+  WebPerfMetrics::NoteNativeTextureLoad();
+  if (glGetError() != GL_NO_ERROR)
+    WebPerfMetrics::NoteNativeGLError();
 
   if (row_length != width)
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
@@ -300,6 +321,15 @@ void StagingTexture::CopyFromTexture(const AbstractTexture* src,
   glReadPixels(src_rect.left, src_rect.top, src_rect.GetWidth(), src_rect.GetHeight(),
                Texture::GetGLFormat(source->GetFormat()), Texture::GetGLType(source->GetFormat()),
                m_buffer.data() + dst_offset);
+  if (source->GetFormat() == AbstractTextureFormat::BGRA8)
+  {
+    SwizzleReadbackRGBA8ToBGRA8(m_buffer.data() + dst_offset,
+                                static_cast<u32>(src_rect.GetWidth()),
+                                static_cast<u32>(src_rect.GetHeight()), m_map_stride);
+  }
+  WebPerfMetrics::NoteNativeReadback();
+  if (glGetError() != GL_NO_ERROR)
+    WebPerfMetrics::NoteNativeGLError();
   glPixelStorei(GL_PACK_ROW_LENGTH, 0);
 
   glBindFramebuffer(GL_READ_FRAMEBUFFER, previous_read_fbo);
@@ -384,6 +414,9 @@ Framebuffer::Create(Texture* color_attachment, Texture* depth_attachment,
   const u32 layers = either_attachment->GetLayers();
   const u32 samples = either_attachment->GetSamples();
 
+  GLint previous_framebuffer = 0;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_framebuffer);
+
   GLuint fbo = 0;
   glGenFramebuffers(1, &fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -411,9 +444,12 @@ Framebuffer::Create(Texture* color_attachment, Texture* depth_attachment,
 
   const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE)
+  {
     WARN_LOG_FMT(VIDEO, "WebGL2 framebuffer is incomplete: 0x{:x}", status);
+    WebPerfMetrics::NoteNativeGLError();
+  }
 
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, previous_framebuffer);
   return std::make_unique<Framebuffer>(color_attachment, depth_attachment,
                                        std::move(additional_color_attachments), color_format,
                                        depth_format, width, height, layers, samples, fbo);

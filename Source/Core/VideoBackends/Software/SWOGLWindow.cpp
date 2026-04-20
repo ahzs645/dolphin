@@ -96,6 +96,16 @@ void dolphin_web_note_frame_presented(int width, int height, double upload_milli
   WebPerfMetrics::NoteWebGLUpload(upload_milliseconds, upload_megabytes);
   WebPerfMetrics::NoteFramePresented(s_latest_width, s_latest_height);
 }
+
+void dolphin_web_note_native_frame_presented(int width, int height)
+{
+  s_latest_frame = nullptr;
+  s_latest_width = static_cast<u32>(std::max(width, 0));
+  s_latest_height = static_cast<u32>(std::max(height, 0));
+  s_latest_stride = s_latest_width * 4;
+  ++s_latest_version;
+  WebPerfMetrics::NoteFramePresented(s_latest_width, s_latest_height);
+}
 }
 #endif
 

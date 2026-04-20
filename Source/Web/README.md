@@ -99,6 +99,13 @@ owns a WebGL2 VAO/VBO/IBO and can upload committed vertex/index ranges with
 implementation step is native vertex-format binding, shader generation, texture
 cache, EFB/XFB framebuffer handling, perf query, and bounding box support.
 
+Use `?renderer=webgl-gx` to boot the guarded native GX experiment. This mode
+selects WebGL2 vertex-format VAOs, the WebGL2 vertex manager, WebGL2
+textures/framebuffers through the default texture cache, hardware EFB handling,
+basic pipeline state binding, and UBO uploads. It is intentionally separate from
+the default renderer because shader translation and compatibility work are still
+incomplete.
+
 Some titles probe invalid memory or rely on DSI exception behavior. The browser
 build defaults MMU off for speed, but `?mmu=1` enables MMU exception handling
 before boot. This is slower, so keep it as a compatibility toggle rather than the

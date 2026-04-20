@@ -121,10 +121,32 @@ svg {
 
 .error-banner {
   grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
   padding: 12px 14px;
   color: #fff2ed;
   background: #953b23;
   border-radius: 8px;
+}
+
+.error-banner span {
+  min-width: 0;
+}
+
+.error-banner button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+  color: #5a1e0c;
+  background: #fff2ed;
+  border: 1px solid #ffd0bd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 750;
+  white-space: nowrap;
 }
 
 .content-grid {

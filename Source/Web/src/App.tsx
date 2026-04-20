@@ -93,6 +93,12 @@ type NativeFrameStats = {
   xfbCopyMiB: number;
   xfbCopies: number;
   presentedFrames: number;
+  nativeDraws: number;
+  nativeVerticesOrIndices: number;
+  nativeFramebufferCopies: number;
+  nativeReadbacks: number;
+  nativeTextureLoads: number;
+  nativeGlErrors: number;
 };
 type DrawMetrics = { uploadMs: number; totalMs: number; bytes: number };
 type FrameDrawResult = {
@@ -124,6 +130,13 @@ type BenchmarkStats = {
   webglUploadMsPerFrame: number;
   webglPresentMsPerFrame: number;
   xfbCopyMsPerFrame: number;
+  presentedFramesRate: number;
+  nativeDrawsRate: number;
+  nativeVerticesOrIndicesRate: number;
+  nativeFramebufferCopiesRate: number;
+  nativeReadbacksRate: number;
+  nativeTextureLoadsRate: number;
+  nativeGlErrorsRate: number;
   sampleMs: number;
 };
 type FramePresenterMode = 'WebGL2 blit' | 'Canvas 2D' | 'Native WebGL2 backend';
@@ -142,6 +155,8 @@ const MAX_BOOT_COPY_BYTES = 256 * 1024 * 1024;
 const WIIMOTE_MOUSE_SCALE = 10000;
 const PRESENTATION_INTERVAL_MS = 1000 / 30;
 const EFB_SNAPSHOT_INTERVAL_MS = 250;
+const MMU_WARNING_LOG_LIMIT = 3;
+const NATIVE_GX_NO_GAME_FRAME_WARNING_MS = 6000;
 const EMPTY_FRAME_STATS: FrameStats = { fps: 0, frames: 0, lastVersion: 0, sampleMs: 0 };
 const EMPTY_CORE_PERF_STATS: CorePerfStats = { fps: 0, vps: 0, speed: 0, maxSpeed: 0 };
 const EMPTY_NATIVE_FRAME_STATS: NativeFrameStats = {
@@ -161,7 +176,13 @@ const EMPTY_NATIVE_FRAME_STATS: NativeFrameStats = {
   xfbCopyMs: 0,
   xfbCopyMiB: 0,
   xfbCopies: 0,
-  presentedFrames: 0
+  presentedFrames: 0,
+  nativeDraws: 0,
+  nativeVerticesOrIndices: 0,
+  nativeFramebufferCopies: 0,
+  nativeReadbacks: 0,
+  nativeTextureLoads: 0,
+  nativeGlErrors: 0
 };
 const EMPTY_BENCHMARK_STATS: BenchmarkStats = {
   draws: 0,
@@ -184,11 +205,20 @@ const EMPTY_BENCHMARK_STATS: BenchmarkStats = {
   webglUploadMsPerFrame: 0,
   webglPresentMsPerFrame: 0,
   xfbCopyMsPerFrame: 0,
+  presentedFramesRate: 0,
+  nativeDrawsRate: 0,
+  nativeVerticesOrIndicesRate: 0,
+  nativeFramebufferCopiesRate: 0,
+  nativeReadbacksRate: 0,
+  nativeTextureLoadsRate: 0,
+  nativeGlErrorsRate: 0,
   sampleMs: 0
 };
 
 let dolphinWebCcallCount = 0;
 let dolphinWebCcallMilliseconds = 0;
+let dolphinWebMmuWarningLogCount = 0;
+let dolphinWebMmuWarningSuppressionLogged = false;
 
 declare global {
   interface Window {
@@ -284,7 +314,13 @@ function readNativeFrameStats(module: DolphinCoreModule): NativeFrameStats {
     xfbCopyMs: ccallNumber(module, 'dolphin_web_perf_xfb_copy_milliseconds'),
     xfbCopyMiB: ccallNumber(module, 'dolphin_web_perf_xfb_copy_megabytes'),
     xfbCopies: ccallNumber(module, 'dolphin_web_perf_xfb_copies'),
-    presentedFrames: ccallNumber(module, 'dolphin_web_perf_presented_frames')
+    presentedFrames: ccallNumber(module, 'dolphin_web_perf_presented_frames'),
+    nativeDraws: ccallNumber(module, 'dolphin_web_perf_native_draws'),
+    nativeVerticesOrIndices: ccallNumber(module, 'dolphin_web_perf_native_vertices_or_indices'),
+    nativeFramebufferCopies: ccallNumber(module, 'dolphin_web_perf_native_framebuffer_copies'),
+    nativeReadbacks: ccallNumber(module, 'dolphin_web_perf_native_readbacks'),
+    nativeTextureLoads: ccallNumber(module, 'dolphin_web_perf_native_texture_loads'),
+    nativeGlErrors: ccallNumber(module, 'dolphin_web_perf_native_gl_errors')
   };
 }
 
@@ -305,7 +341,24 @@ async function loadRealDolphinCore(): Promise<DolphinCoreModule> {
     locateFile: (fileName: string) => `/dolphin-core/${fileName}`,
     print: (message: string) => console.log(`[dolphin] ${message}`),
     printErr: (message: string) => {
-      console.warn(`[dolphin] ${message}`);
+      if (!message.trim()) {
+        return;
+      }
+
+      if (isMmuMemoryWarning(message)) {
+        dolphinWebMmuWarningLogCount += 1;
+        if (dolphinWebMmuWarningLogCount <= MMU_WARNING_LOG_LIMIT) {
+          console.warn(`[dolphin] ${message}`);
+        } else if (!dolphinWebMmuWarningSuppressionLogged) {
+          console.warn(
+            '[dolphin] Suppressing repeated invalid-memory/MMU warnings. Retry with mmu=1 to enable Dolphin MMU exception handling for this title.'
+          );
+          dolphinWebMmuWarningSuppressionLogged = true;
+        }
+      } else {
+        console.warn(`[dolphin] ${message}`);
+      }
+
       window.dispatchEvent(new CustomEvent('dolphin-core-stderr', { detail: message }));
     }
   });
@@ -372,7 +425,13 @@ function getRequestedCoreRenderer(): string {
   const renderer = new URLSearchParams(window.location.search)
     .get(RENDERER_QUERY_PARAM)
     ?.toLowerCase();
-  return renderer === 'software' || renderer === 'sw' ? 'Software Renderer' : 'WebGL2';
+  if (renderer === 'software' || renderer === 'sw') {
+    return 'Software Renderer';
+  }
+  if (renderer === 'webgl-gx' || renderer === 'webgl2-gx' || renderer === 'native-gx') {
+    return 'WebGL2 GX';
+  }
+  return 'WebGL2';
 }
 
 function isTruthyQueryParam(value: string | null): boolean {
@@ -385,6 +444,27 @@ function isTruthyQueryParam(value: string | null): boolean {
 
 function isMmuRequested(): boolean {
   return isTruthyQueryParam(new URLSearchParams(window.location.search).get(MMU_QUERY_PARAM));
+}
+
+function isMmuMemoryWarning(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  return (
+    lowerMessage.includes('invalid read from') ||
+    lowerMessage.includes('invalid write to') ||
+    lowerMessage.includes('enable mmu') ||
+    lowerMessage.includes('game probably would have crashed on real hardware')
+  );
+}
+
+function urlWithMmuEnabled(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set(MMU_QUERY_PARAM, '1');
+  return url.toString();
+}
+
+function resetDolphinWarningCounters(): void {
+  dolphinWebMmuWarningLogCount = 0;
+  dolphinWebMmuWarningSuppressionLogged = false;
 }
 
 function initializeCoreRenderer(module: DolphinCoreModule): number {
@@ -403,7 +483,11 @@ function initializeCoreRenderer(module: DolphinCoreModule): number {
 }
 
 function isNativeWebGL2CoreRenderer(): boolean {
-  return getRequestedCoreRenderer() === 'WebGL2';
+  return getRequestedCoreRenderer().startsWith('WebGL2');
+}
+
+function isExperimentalWebGL2GXRenderer(): boolean {
+  return getRequestedCoreRenderer() === 'WebGL2 GX';
 }
 
 function createShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -870,11 +954,20 @@ export function App(): ReactElement {
     webglPresentMs: 0,
     webglPresents: 0,
     xfbCopyMs: 0,
-    xfbCopies: 0
+    xfbCopies: 0,
+    presentedFrames: 0,
+    nativeDraws: 0,
+    nativeVerticesOrIndices: 0,
+    nativeFramebufferCopies: 0,
+    nativeReadbacks: 0,
+    nativeTextureLoads: 0,
+    nativeGlErrors: 0
   });
   const lastPresentationAt = useRef(0);
   const lastEfbSnapshotAt = useRef(0);
   const autoBootStarted = useRef(false);
+  const mmuWarningCountRef = useRef(0);
+  const mmuWarningBannerShown = useRef(false);
   const [capabilities, setCapabilities] = useState<BrowserCapability[]>([]);
   const [mountedDisc, setMountedDisc] = useState<MountedDisc | null>(null);
   const [nandMount, setNandMount] = useState<NandMount | null>(null);
@@ -895,6 +988,7 @@ export function App(): ReactElement {
     active: false
   });
   const [error, setError] = useState<string | null>(null);
+  const [mmuWarningCount, setMmuWarningCount] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const mmuRequested = useMemo(() => isMmuRequested(), []);
 
@@ -924,6 +1018,13 @@ export function App(): ReactElement {
       { label: 'SW batches', value: `${benchmarkStats.swRasterBatchesRate.toFixed(0)}/s` },
       { label: 'WebGL upload', value: millisecondsLabel(benchmarkStats.webglUploadMsPerFrame) },
       { label: 'WebGL present', value: millisecondsLabel(benchmarkStats.webglPresentMsPerFrame) },
+      { label: 'Presented', value: `${benchmarkStats.presentedFramesRate.toFixed(0)}/s` },
+      { label: 'Native draws', value: `${benchmarkStats.nativeDrawsRate.toFixed(0)}/s` },
+      { label: 'Native verts', value: `${benchmarkStats.nativeVerticesOrIndicesRate.toFixed(0)}/s` },
+      { label: 'FB blits', value: `${benchmarkStats.nativeFramebufferCopiesRate.toFixed(0)}/s` },
+      { label: 'Readbacks', value: `${benchmarkStats.nativeReadbacksRate.toFixed(0)}/s` },
+      { label: 'Tex loads', value: `${benchmarkStats.nativeTextureLoadsRate.toFixed(0)}/s` },
+      { label: 'GL errors', value: `${benchmarkStats.nativeGlErrorsRate.toFixed(0)}/s` },
       { label: 'XFB copy', value: millisecondsLabel(benchmarkStats.xfbCopyMsPerFrame) },
       { label: 'JS bridge', value: `${benchmarkStats.ccallMsRate.toFixed(2)} ms/s` },
       { label: 'Bridge calls', value: `${benchmarkStats.ccallRate.toFixed(0)}/s` },
@@ -1006,6 +1107,15 @@ export function App(): ReactElement {
     const webglPresents = nativeFrameStats.webglPresents - stats.webglPresents;
     const xfbCopyMs = nativeFrameStats.xfbCopyMs - stats.xfbCopyMs;
     const xfbCopies = nativeFrameStats.xfbCopies - stats.xfbCopies;
+    const presentedFrames = nativeFrameStats.presentedFrames - stats.presentedFrames;
+    const nativeDraws = nativeFrameStats.nativeDraws - stats.nativeDraws;
+    const nativeVerticesOrIndices =
+      nativeFrameStats.nativeVerticesOrIndices - stats.nativeVerticesOrIndices;
+    const nativeFramebufferCopies =
+      nativeFrameStats.nativeFramebufferCopies - stats.nativeFramebufferCopies;
+    const nativeReadbacks = nativeFrameStats.nativeReadbacks - stats.nativeReadbacks;
+    const nativeTextureLoads = nativeFrameStats.nativeTextureLoads - stats.nativeTextureLoads;
+    const nativeGlErrors = nativeFrameStats.nativeGlErrors - stats.nativeGlErrors;
     const nextBenchmarkStats = {
       draws: stats.draws,
       avgDrawMs: stats.draws > 0 ? stats.drawMs / stats.draws : 0,
@@ -1027,6 +1137,13 @@ export function App(): ReactElement {
       webglUploadMsPerFrame: webglUploads > 0 ? webglUploadMs / webglUploads : 0,
       webglPresentMsPerFrame: webglPresents > 0 ? webglPresentMs / webglPresents : 0,
       xfbCopyMsPerFrame: xfbCopies > 0 ? xfbCopyMs / xfbCopies : 0,
+      presentedFramesRate: (presentedFrames * 1000) / sampleMs,
+      nativeDrawsRate: (nativeDraws * 1000) / sampleMs,
+      nativeVerticesOrIndicesRate: (nativeVerticesOrIndices * 1000) / sampleMs,
+      nativeFramebufferCopiesRate: (nativeFramebufferCopies * 1000) / sampleMs,
+      nativeReadbacksRate: (nativeReadbacks * 1000) / sampleMs,
+      nativeTextureLoadsRate: (nativeTextureLoads * 1000) / sampleMs,
+      nativeGlErrorsRate: (nativeGlErrors * 1000) / sampleMs,
       sampleMs
     };
 
@@ -1057,7 +1174,14 @@ export function App(): ReactElement {
       webglPresentMs: nativeFrameStats.webglPresentMs,
       webglPresents: nativeFrameStats.webglPresents,
       xfbCopyMs: nativeFrameStats.xfbCopyMs,
-      xfbCopies: nativeFrameStats.xfbCopies
+      xfbCopies: nativeFrameStats.xfbCopies,
+      presentedFrames: nativeFrameStats.presentedFrames,
+      nativeDraws: nativeFrameStats.nativeDraws,
+      nativeVerticesOrIndices: nativeFrameStats.nativeVerticesOrIndices,
+      nativeFramebufferCopies: nativeFrameStats.nativeFramebufferCopies,
+      nativeReadbacks: nativeFrameStats.nativeReadbacks,
+      nativeTextureLoads: nativeFrameStats.nativeTextureLoads,
+      nativeGlErrors: nativeFrameStats.nativeGlErrors
     };
   }
 
@@ -1084,7 +1208,14 @@ export function App(): ReactElement {
       webglPresentMs: nativeFrameStats.webglPresentMs,
       webglPresents: nativeFrameStats.webglPresents,
       xfbCopyMs: nativeFrameStats.xfbCopyMs,
-      xfbCopies: nativeFrameStats.xfbCopies
+      xfbCopies: nativeFrameStats.xfbCopies,
+      presentedFrames: nativeFrameStats.presentedFrames,
+      nativeDraws: nativeFrameStats.nativeDraws,
+      nativeVerticesOrIndices: nativeFrameStats.nativeVerticesOrIndices,
+      nativeFramebufferCopies: nativeFrameStats.nativeFramebufferCopies,
+      nativeReadbacks: nativeFrameStats.nativeReadbacks,
+      nativeTextureLoads: nativeFrameStats.nativeTextureLoads,
+      nativeGlErrors: nativeFrameStats.nativeGlErrors
     };
     window.__dolphinFrameStats = EMPTY_FRAME_STATS;
     window.__dolphinPerfStats = EMPTY_CORE_PERF_STATS;
@@ -1092,6 +1223,13 @@ export function App(): ReactElement {
     setFrameStats(EMPTY_FRAME_STATS);
     setCorePerfStats(EMPTY_CORE_PERF_STATS);
     setBenchmarkStats(EMPTY_BENCHMARK_STATS);
+  }
+
+  function resetMmuWarningState(): void {
+    mmuWarningCountRef.current = 0;
+    mmuWarningBannerShown.current = false;
+    setMmuWarningCount(0);
+    resetDolphinWarningCounters();
   }
 
   useEffect(() => {
@@ -1123,20 +1261,27 @@ export function App(): ReactElement {
         return;
       }
 
-      if (
-        message.includes('Invalid read from') ||
-        message.includes('Invalid write to') ||
-        message.includes('Enable MMU')
-      ) {
-        setError(
-          'Dolphin reported an invalid emulated memory access. Reload with ?mmu=1 or &mmu=1 to enable MMU exception handling for this title.'
-        );
+      if (isMmuMemoryWarning(message)) {
+        const nextCount = mmuWarningCountRef.current + 1;
+        mmuWarningCountRef.current = nextCount;
+        if (nextCount <= MMU_WARNING_LOG_LIMIT || nextCount % 25 === 0) {
+          setMmuWarningCount(nextCount);
+        }
+
+        if (!mmuWarningBannerShown.current) {
+          mmuWarningBannerShown.current = true;
+          setError(
+            mmuRequested
+              ? 'Dolphin still reported invalid emulated memory access with MMU enabled. This is likely a browser-build compatibility issue for this title.'
+              : 'Dolphin reported invalid emulated memory access. Retry with MMU enabled for better compatibility; it will run slower.'
+          );
+        }
       }
     };
 
     window.addEventListener('dolphin-core-stderr', onCoreStderr);
     return () => window.removeEventListener('dolphin-core-stderr', onCoreStderr);
-  }, []);
+  }, [mmuRequested]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1185,6 +1330,14 @@ export function App(): ReactElement {
           frameVersion.current = nativeVersion;
           updateScreenStatus(`Native frame ${nativeVersion}`);
         } else {
+          if (
+            isExperimentalWebGL2GXRenderer() &&
+            bootStateRef.current === 'success' &&
+            nativeVersion <= 1 &&
+            now - frameStatsWindow.current.startedAt >= NATIVE_GX_NO_GAME_FRAME_WARNING_MS
+          ) {
+            updateScreenStatus('Native GX context is alive; no game GPU frame has presented yet');
+          }
           setCorePerfStats(readCorePerfStats(module));
         }
       } else if (module && canvas && now - lastPresentationAt.current >= PRESENTATION_INTERVAL_MS) {
@@ -1391,6 +1544,7 @@ export function App(): ReactElement {
   }
 
   async function bootFile(file: File): Promise<void> {
+    resetMmuWarningState();
     setError(null);
     setBootState('booting');
     setBootMessage(`Copying ${file.name} into Dolphin MEMFS`);
@@ -1415,6 +1569,7 @@ export function App(): ReactElement {
   }
 
   async function bootRemoteFile(rawUrl: string): Promise<void> {
+    resetMmuWarningState();
     setError(null);
     setBootState('booting');
 
@@ -1469,6 +1624,7 @@ export function App(): ReactElement {
   }
 
   async function attemptWiiMenuBoot(): Promise<void> {
+    resetMmuWarningState();
     setError(null);
     setBootState('booting');
     setBootMessage('Looking for the real Dolphin web core');
@@ -1606,7 +1762,19 @@ export function App(): ReactElement {
           />
         </div>
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error ? (
+          <div className="error-banner" role="alert">
+            <span>
+              {error}
+              {mmuWarningCount > 1 ? ` (${mmuWarningCount} warnings)` : null}
+            </span>
+            {!mmuRequested && mmuWarningCount > 0 ? (
+              <button type="button" onClick={() => window.location.assign(urlWithMmuEnabled())}>
+                Retry with MMU
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="content-grid">
