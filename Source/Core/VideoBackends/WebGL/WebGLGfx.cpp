@@ -366,6 +366,23 @@ void Gfx::ApplyBlendingState(BlendingState state)
   m_current_blend_state = state;
 }
 
+void Gfx::UnbindFramebufferAttachmentTextures(const AbstractFramebuffer* framebuffer)
+{
+  if (!framebuffer)
+    return;
+
+  const AbstractTexture* const color_attachment = framebuffer->GetColorAttachment();
+  const AbstractTexture* const depth_attachment = framebuffer->GetDepthAttachment();
+  if (!color_attachment && !depth_attachment)
+    return;
+
+  for (u32 i = 0; i < m_bound_textures.size(); ++i)
+  {
+    if (m_bound_textures[i] == color_attachment || m_bound_textures[i] == depth_attachment)
+      SetTexture(i, nullptr);
+  }
+}
+
 void Gfx::SetPipeline(const AbstractPipeline* pipeline)
 {
   if (m_software_rasterizer_frontend)
@@ -402,6 +419,7 @@ void Gfx::SetFramebuffer(AbstractFramebuffer* framebuffer)
   if (m_current_framebuffer == framebuffer)
     return;
 
+  UnbindFramebufferAttachmentTextures(framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, static_cast<Framebuffer*>(framebuffer)->GetFBO());
   m_current_framebuffer = framebuffer;
 }
@@ -561,6 +579,22 @@ void Gfx::SetViewport(float x, float y, float width, float height, float near_de
 {
   glViewport(static_cast<GLint>(std::ceil(x)), static_cast<GLint>(std::ceil(y)),
              static_cast<GLsizei>(std::ceil(width)), static_cast<GLsizei>(std::ceil(height)));
+  near_depth = std::clamp(near_depth, 0.0f, 1.0f);
+  far_depth = std::clamp(far_depth, 0.0f, 1.0f);
+  if (near_depth > far_depth)
+  {
+    static bool warned_reversed_depth_range = false;
+    if (!warned_reversed_depth_range)
+    {
+      emscripten_console_warn(
+          "WebGL2 backend received a reversed depth range; sorting for WebGL compatibility.");
+      warned_reversed_depth_range = true;
+    }
+
+    const float sorted_near_depth = far_depth;
+    far_depth = near_depth;
+    near_depth = sorted_near_depth;
+  }
   glDepthRangef(near_depth, far_depth);
 }
 
@@ -602,8 +636,16 @@ bool Gfx::BindBackbuffer(const ClearColor& clear_color)
   m_current_framebuffer = m_system_framebuffer.get();
   glViewport(0, 0, m_context->GetBackbufferWidth(), m_context->GetBackbufferHeight());
   glScissor(0, 0, m_context->GetBackbufferWidth(), m_context->GetBackbufferHeight());
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDepthMask(GL_TRUE);
   glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  glEnable(GL_SCISSOR_TEST);
+  m_current_pipeline = nullptr;
+  m_current_rasterization_state = RenderState::GetInvalidRasterizationState();
+  m_current_depth_state = RenderState::GetInvalidDepthState();
+  m_current_blend_state = RenderState::GetInvalidBlendingState();
   return true;
 }
 
@@ -658,6 +700,11 @@ void Gfx::ShowImage(const AbstractTexture* source_texture, const MathUtil::Recta
 
     glUseProgram(m_image_2d_program);
     glBindVertexArray(m_image_vao);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_image_upload_texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -692,6 +739,10 @@ void Gfx::ShowImage(const AbstractTexture* source_texture, const MathUtil::Recta
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindVertexArray(0);
     glUseProgram(0);
+    m_current_pipeline = nullptr;
+    m_current_rasterization_state = RenderState::GetInvalidRasterizationState();
+    m_current_depth_state = RenderState::GetInvalidDepthState();
+    m_current_blend_state = RenderState::GetInvalidBlendingState();
     PresentBackbuffer();
     const double upload_milliseconds =
         std::chrono::duration<double, std::milli>(upload_end - upload_start).count();
@@ -722,13 +773,22 @@ void Gfx::ShowImage(const AbstractTexture* source_texture, const MathUtil::Recta
   m_current_framebuffer = m_system_framebuffer.get();
   glViewport(0, 0, m_context->GetBackbufferWidth(), m_context->GetBackbufferHeight());
   glScissor(0, 0, m_context->GetBackbufferWidth(), m_context->GetBackbufferHeight());
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDepthMask(GL_TRUE);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  glEnable(GL_SCISSOR_TEST);
 
   const GLuint program =
       texture->GetGLTarget() == GL_TEXTURE_2D_ARRAY ? m_image_2d_array_program : m_image_2d_program;
   glUseProgram(program);
   glBindVertexArray(m_image_vao);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
   const float texture_width = static_cast<float>(std::max(texture->GetWidth(), 1u));
   const float texture_height = static_cast<float>(std::max(texture->GetHeight(), 1u));
@@ -746,6 +806,10 @@ void Gfx::ShowImage(const AbstractTexture* source_texture, const MathUtil::Recta
   glBindTexture(texture->GetGLTarget(), 0);
   glBindVertexArray(0);
   glUseProgram(0);
+  m_current_pipeline = nullptr;
+  m_current_rasterization_state = RenderState::GetInvalidRasterizationState();
+  m_current_depth_state = RenderState::GetInvalidDepthState();
+  m_current_blend_state = RenderState::GetInvalidBlendingState();
 
   PresentBackbuffer();
 }

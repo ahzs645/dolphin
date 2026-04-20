@@ -76,7 +76,7 @@ void VideoBackend::InitBackendInfo(const WindowSystemInfo& wsi)
   g_backend_info.bSupportsGeometryShaders = false;
   g_backend_info.bSupportsComputeShaders = false;
   g_backend_info.bSupports3DVision = false;
-  g_backend_info.bSupportsEarlyZ = true;
+  g_backend_info.bSupportsEarlyZ = false;
   g_backend_info.bSupportsBindingLayout = false;
   g_backend_info.bSupportsBBox = false;
   g_backend_info.bSupportsGSInstancing = false;
@@ -86,7 +86,9 @@ void VideoBackend::InitBackendInfo(const WindowSystemInfo& wsi)
   g_backend_info.bSupportsSSAA = false;
   g_backend_info.bSupportsFragmentStoresAndAtomics = false;
   g_backend_info.bSupportsDepthClamp = false;
-  g_backend_info.bSupportsReversedDepthRange = IsExperimentalGXBackendEnabled();
+  // WebGL rejects glDepthRange calls where near > far, so the browser backend can't expose
+  // Dolphin's reversed depth range path even when the native GX path is enabled.
+  g_backend_info.bSupportsReversedDepthRange = false;
   g_backend_info.bSupportsLogicOp = false;
   g_backend_info.bSupportsMultithreading = false;
   g_backend_info.bSupportsGPUTextureDecoding = false;

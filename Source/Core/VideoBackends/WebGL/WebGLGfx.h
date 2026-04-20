@@ -75,6 +75,7 @@ private:
   void ApplyRasterizationState(RasterizationState state);
   void ApplyDepthState(DepthState state);
   void ApplyBlendingState(BlendingState state);
+  void UnbindFramebufferAttachmentTextures(const AbstractFramebuffer* framebuffer);
   void UpdateBackbuffer();
   bool EnsureImageBlitResources(GLenum texture_target);
 

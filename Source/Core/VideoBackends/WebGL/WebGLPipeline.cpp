@@ -91,7 +91,13 @@ void BindProgramVariables(GLuint program)
       glUniformBlockBinding(program, block_index, binding);
   }
 
-  for (u32 i = 0; i < 8; ++i)
+  static constexpr std::array<GLint, 8> sampler_units = {{0, 1, 2, 3, 4, 5, 6, 7}};
+  const GLint sampler_array_location = glGetUniformLocation(program, "samp[0]");
+  if (sampler_array_location >= 0)
+    glUniform1iv(sampler_array_location, static_cast<GLsizei>(sampler_units.size()),
+                 sampler_units.data());
+
+  for (u32 i = 0; i < sampler_units.size(); ++i)
   {
     std::string sampler_name = "samp[" + std::to_string(i) + "]";
     GLint location = glGetUniformLocation(program, sampler_name.c_str());

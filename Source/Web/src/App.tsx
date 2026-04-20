@@ -1777,6 +1777,45 @@ export function App(): ReactElement {
         ) : null}
       </section>
 
+      <section className="panel wide-panel screen-panel primary-screen">
+        <div className="panel-heading">
+          <h2>Screen</h2>
+          <StatusPill
+            available={
+              screenStatus.startsWith('Frame') ||
+              screenStatus.startsWith('EFB') ||
+              framePresenterMode === 'Native WebGL2 backend'
+            }
+          />
+        </div>
+        <div className="screen-stage">
+          <canvas
+            id="dolphin-webgl-canvas"
+            ref={screenCanvas}
+            width="640"
+            height="480"
+            onPointerDown={handleScreenPointerDown}
+            onPointerMove={handleScreenPointerMove}
+            onPointerUp={handleScreenPointerUp}
+            onPointerLeave={handleScreenPointerLeave}
+            onPointerCancel={handleScreenPointerCancel}
+            onContextMenu={(event) => event.preventDefault()}
+          />
+        </div>
+        <div className="screen-status">
+          <span className="field-label">Frame bridge</span>
+          <strong>{screenStatus}</strong>
+          <span className="field-label">Render path</span>
+          <strong>{framePresenterMode}</strong>
+          <span className="field-label">Displayed FPS</span>
+          <strong>{frameRateLabel(frameStats)}</strong>
+          <span className="field-label">Core speed</span>
+          <strong>{coreSpeedLabel(corePerfStats)}</strong>
+          <span className="field-label">Wii Remote</span>
+          <strong>{wiimotePointerLabel(wiimotePointer)}</strong>
+        </div>
+      </section>
+
       <section className="content-grid">
         <div className="panel">
           <div className="panel-heading">
@@ -1817,45 +1856,6 @@ export function App(): ReactElement {
                 <strong>{item.value}</strong>
               </div>
             ))}
-          </div>
-        </div>
-
-        <div className="panel wide-panel screen-panel">
-          <div className="panel-heading">
-            <h2>Screen</h2>
-            <StatusPill
-              available={
-                screenStatus.startsWith('Frame') ||
-                screenStatus.startsWith('EFB') ||
-                framePresenterMode === 'Native WebGL2 backend'
-              }
-            />
-          </div>
-          <div className="screen-stage">
-            <canvas
-              id="dolphin-webgl-canvas"
-              ref={screenCanvas}
-              width="640"
-              height="480"
-              onPointerDown={handleScreenPointerDown}
-              onPointerMove={handleScreenPointerMove}
-              onPointerUp={handleScreenPointerUp}
-              onPointerLeave={handleScreenPointerLeave}
-              onPointerCancel={handleScreenPointerCancel}
-              onContextMenu={(event) => event.preventDefault()}
-            />
-          </div>
-          <div className="screen-status">
-            <span className="field-label">Frame bridge</span>
-            <strong>{screenStatus}</strong>
-            <span className="field-label">Render path</span>
-            <strong>{framePresenterMode}</strong>
-            <span className="field-label">Displayed FPS</span>
-            <strong>{frameRateLabel(frameStats)}</strong>
-            <span className="field-label">Core speed</span>
-            <strong>{coreSpeedLabel(corePerfStats)}</strong>
-            <span className="field-label">Wii Remote</span>
-            <strong>{wiimotePointerLabel(wiimotePointer)}</strong>
           </div>
         </div>
 
